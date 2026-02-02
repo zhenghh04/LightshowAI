@@ -51,7 +51,8 @@ def compare_between_spectra(
     output_correlations = ["pearson","spearman"],
     opt_strategy : str = "grid_search",
     accuracy=0.01,
-    method="coss"
+    method="coss",
+    norm_y_axis: bool = True
 ):
     """Automatic align the spectra and calculate the correlation coefficients.
     The spectra are first truncated to a comparison window defined by a provided range and starting at a threshold where the spectrum reaches some fraction of its peak
@@ -78,6 +79,9 @@ def compare_between_spectra(
     accuracy : float, default=0.01
         Accuracy for spectra alignment. Relevant only to opt_strategy == "grid_search"  Unit: eV.
 
+    norm_y_axis : bool
+        Control whether the y-axes are shifted and normalized to range (0,1) prior to comparison (default: True)
+
     Returns
     -------
     correlations: dict mapping similarity metrics to their values computed at the optimal point. Control which metrics are included alongside the optimization metric using 'output_correlations'
@@ -88,19 +92,25 @@ def compare_between_spectra(
 
     """
 
+    def norm_y(absorbtion, do_norm):
+        if do_norm == True:
+            return ( absorbtion - np.min(absorbtion) ) / np.max(absorbtion)
+        else:
+            return absorbtion
+               
     #Truncate spectra and re-zero the x-axis
     start1, end1 = truncate_spectrum(spectrum1, erange, threshold=erange_threshold)
     plot1 = np.column_stack(
         (
             spectrum1[start1:end1, 0] - spectrum1[start1][0],
-            spectrum1[start1:end1, 1],
+            norm_y(spectrum1[start1:end1, 1], norm_y_axis)
         )
     )
     start2, end2 = truncate_spectrum(spectrum2, erange, threshold=erange_threshold)
     plot2 = np.column_stack(
         (
             spectrum2[start2:end2, 0] - spectrum2[start2][0],
-            spectrum2[start2:end2, 1],
+            norm_y(spectrum2[start2:end2, 1], norm_y_axis)
         )
     )
 
@@ -108,7 +118,7 @@ def compare_between_spectra(
 
     #Optimize the shift
     _, shift = max_corr(plot1, plot2, step=accuracy, method=method, grid=grid_interpolator, opt_strategy=opt_strategy)
-
+    
     #Calculate correlation metrics at optimal point
     correlations = {}
     op = output_correlations.copy()
@@ -144,7 +154,7 @@ def truncate_spectrum(spectrum, erange=35, threshold=0.02):
 
     """
     x = spectrum[:, 0]
-    y = spectrum[:, 1] / np.max(spectrum[:, 1])
+    y = ( spectrum[:, 1] - np.min(spectrum[:,1]) ) / np.max(spectrum[:, 1]) #enforce range (0,1)
 
     logic = y > threshold
     seq = x == x[logic][0]
