@@ -5,7 +5,7 @@
 import numpy as np
 import scipy
 from scipy import interpolate
-from scipy.stats import pearsonr, spearmanr, kendalltau
+from scipy.stats import pearsonr, spearmanr, kendalltau, wasserstein_distance
 import math
 from typing import Callable
 
@@ -114,7 +114,7 @@ def compare_between_spectra(
     op = output_correlations.copy()
     if method not in op:
         op.append(method)
-
+        
     cm = spectra_corr(plot1, plot2, omega=shift, verbose=True, method=op, grid=grid_interpolator)
     for i, method in enumerate(op):
         correlations[method] = cm[i]
@@ -174,18 +174,24 @@ def cos_similar(v1, v2):
     cosSimilarity = np.dot(v1, v2) / (norm1 * norm2)
     return cosSimilarity
 
-def similarity(spect1: np.ndarray, spect2: np.ndarray, sim_type: str):
+def similarity(grid: np.ndarray, spect1: np.ndarray, spect2: np.ndarray, sim_type: str):
     """Return the similarity between two XAS spectra using the provided metric
     It is assumed that the spectra are aligned to the same grids prior to calling this function
+    The similarity is always defined such that maximization results in the most similar spectra
 
     Parameters
     ----------
+    grid: 1d array - the common grid over which the spectra are defined
     spect1, spect2: 1d arrays of the absorbtion. 
     sim_type: The similarity metric
               "pearson" - The Pearson correlation
               "spearman" - The Spearman correlation
               "coss" - The cosine similarity v1 \dot v2 / |v1||v2|
               "kendalltaub" - Kendall's tau-b metric
+              "normed_wasserstein" - The Wasserstein (aka earth-mover's) distance. We normalize the y-axis by its sum then treat each spectrum as a discrete 
+                                     probability distribution (cf https://lilianweng.github.io/posts/2017-08-20-gan/#what-is-wasserstein-distance).
+                                     The distance is then normalized to [0,1] by dividing by the full range of the grid, then subtracted from 1 as a similarity metric
+              "coss_deriv" - The cosine similarity applied to the gradient of the two curves
     
     Output: the similarity metric
     """
@@ -198,12 +204,15 @@ def similarity(spect1: np.ndarray, spect2: np.ndarray, sim_type: str):
         metric = cos_similar(spect1,spect2)
     elif sim_type == "kendalltaub":
         metric = kendalltau(scipy.stats.rankdata(spect1), scipy.stats.rankdata(spect2))[0]
+    elif sim_type == "normed_wasserstein":
+        metric = 1 - wasserstein_distance(grid,grid,u_weights=spect1/np.sum(spect1), v_weights=spect2/np.sum(spect2))/(grid[-1] - grid[0])
+    elif sim_type == "coss_deriv":
+        metric = cos_similar(np.gradient(spect1,grid), np.gradient(spect2,grid))        
     else:
         raise Exception("Unknown sim_type")
     
     return metric
     
-  
 
     
 def spectra_corr(
@@ -250,7 +259,7 @@ def spectra_corr(
     curve2 = interp2(grid)
     indices = ~(np.isnan(curve1) | np.isnan(curve2))
 
-    correlation = np.array([ similarity(curve1[indices], curve2[indices], sim_type) for sim_type in (method if isinstance(method,list) else [method]) ])
+    correlation = np.array([ similarity(grid[indices], curve1[indices], curve2[indices], sim_type) for sim_type in (method if isinstance(method,list) else [method]) ])
 
     width = 0.5 * min(
         spectrum1[-1, 0] - spectrum1[0, 0], spectrum2[-1, 0] - spectrum2[0, 0]
