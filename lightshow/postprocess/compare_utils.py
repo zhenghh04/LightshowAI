@@ -47,12 +47,14 @@ def compare_between_spectra(
     spectrum2 : np.ndarray,
     erange : float =35,
     erange_threshold : float = 0.02,
+    erange_lbound_delta : float = 5,    
+    truncation_strategy : str = "separately",
     grid_interpolator = gridInterpolatorFixedN(300), 
     output_correlations = ["pearson","spearman"],
     opt_strategy : str = "grid_search",
     accuracy=0.01,
     method="coss",
-    norm_y_axis: bool = True
+    norm_y_axis: bool = True,
 ):
     """Automatic align the spectra and calculate the correlation coefficients.
     The spectra are first truncated to a comparison window defined by a provided range and starting at a threshold where the spectrum reaches some fraction of its peak
@@ -71,6 +73,12 @@ def compare_between_spectra(
         Energy range for comparison. Unit: eV.
     erange_threshold : float, default=0.02
         The threshold fraction of the spectrum maximum at which to define the start the comparison range
+    truncation_strategy : str, default  "separately",            
+        The strategy for truncating the spectra to the window of interest. Options:
+        "separately": both spectra are independently truncated to a window of size 'erange' starting at the point defined by 'erange_threshold'
+        "from_spect2": spectrum2 is truncated as above, and spectrum1 is truncated to the energy range [ min(spectrum2[:,0]) - erange_lbound_delta, max(spectrum2[:,0]) ]
+
+    erange_lbound_delta: cf. 'truncation_strategy'
 
     grid_interpolator: a callable that constructs the interpolation grid for computing the similarity, cf spectra_corr
 
@@ -94,26 +102,38 @@ def compare_between_spectra(
 
     def norm_y(absorbtion, do_norm):
         if do_norm == True:
-            return ( absorbtion - np.min(absorbtion) ) / np.max(absorbtion)
+            tmp = ( absorbtion - np.min(absorbtion) )
+            tmp = tmp / np.max(tmp)
+            return tmp
         else:
             return absorbtion
                
     #Truncate spectra and re-zero the x-axis
-    start1, end1 = truncate_spectrum(spectrum1, erange, threshold=erange_threshold)
+    if truncation_strategy == "separately":
+        start1, end1 = truncate_spectrum(spectrum1, erange, threshold=erange_threshold)
+        start2, end2 = truncate_spectrum(spectrum2, erange, threshold=erange_threshold)
+
+    elif truncation_strategy == "from_spect2":
+        start2, end2 = truncate_spectrum(spectrum2, erange, threshold=erange_threshold)
+
+        start1 = np.abs(spectrum1[:,0] - (spectrum2[start2,0] - erange_lbound_delta)   ).argmin()
+        end1 = np.abs(spectrum1[:,0] - spectrum2[end2,0]).argmin()
+
+    #print("Spectrum1:", spectrum1[start1,0],spectrum1[end1,0],"points",end1-start1+1)
+    #print("Spectrum2:", spectrum2[start2,0],spectrum2[end2,0],"points",end2-start2+1)
+
     plot1 = np.column_stack(
         (
             spectrum1[start1:end1, 0] - spectrum1[start1][0],
             norm_y(spectrum1[start1:end1, 1], norm_y_axis)
         )
     )
-    start2, end2 = truncate_spectrum(spectrum2, erange, threshold=erange_threshold)
     plot2 = np.column_stack(
         (
             spectrum2[start2:end2, 0] - spectrum2[start2][0],
             norm_y(spectrum2[start2:end2, 1], norm_y_axis)
         )
-    )
-
+    )        
     shift_prior = spectrum1[start1, 0] - spectrum2[start2, 0]
 
     #Optimize the shift
@@ -154,7 +174,8 @@ def truncate_spectrum(spectrum, erange=35, threshold=0.02):
 
     """
     x = spectrum[:, 0]
-    y = ( spectrum[:, 1] - np.min(spectrum[:,1]) ) / np.max(spectrum[:, 1]) #enforce range (0,1)
+    y = ( spectrum[:, 1] - np.min(spectrum[:,1]) )
+    y = y/ np.max(spectrum[:, 1]) #enforce range (0,1)
 
     logic = y > threshold
     seq = x == x[logic][0]
@@ -215,7 +236,7 @@ def similarity(grid: np.ndarray, spect1: np.ndarray, spect2: np.ndarray, sim_typ
     elif sim_type == "kendalltaub":
         metric = kendalltau(scipy.stats.rankdata(spect1), scipy.stats.rankdata(spect2))[0]
     elif sim_type == "normed_wasserstein":
-        metric = 1 - wasserstein_distance(grid,grid,u_weights=spect1/np.sum(spect1), v_weights=spect2/np.sum(spect2))/(grid[-1] - grid[0])
+        metric = 1 - wasserstein_distance(grid,grid,u_weights=np.abs(spect1/np.sum(spect1)), v_weights=np.abs(spect2/np.sum(spect2)) )/(grid[-1] - grid[0])
     elif sim_type == "coss_deriv":
         metric = cos_similar(np.gradient(spect1,grid), np.gradient(spect2,grid))        
     else:
