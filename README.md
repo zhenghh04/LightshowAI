@@ -5,7 +5,11 @@
 
 Using [machine-learned neural networks](https://doi.org/10.48550/arXiv.2409.19552) stacked on top of the [M3GNet architecture](https://github.com/materialsvirtuallab/m3gnet), we have built in direct XANES spectrum prediction. To use this feature, you should install Lightshow's AI dependencies:
 ```bash
-pip install "lightshow[ai]"
+conda create -n LightshowAI python=3.11
+conda activate LightshowAI
+git clone git@github.com:AI-multimodal/LightshowAI.git LightshowAI
+cd LightshowAI
+pip install -e .
 ```
 and then use
 
