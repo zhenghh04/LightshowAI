@@ -31,7 +31,7 @@ dependencies = [
     "mp-api==0.41.2",
     "numpy<=1.26.4",
     "pymatgen >=2024.3.1, <=2024.11.13",
-    "torch==2.3.0",
+    "torch==2.2.0",
     "torchdata==0.7.1",
     "gunicorn>=23.0.0",
     "gevent>=25.5.0",
