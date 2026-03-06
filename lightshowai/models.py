@@ -16,8 +16,8 @@ from matgl.utils.cutoff import polynomial_cutoff
 from pymatgen.core import Structure as PymatgenStructure
 from torch import nn
 
-PARENT_DIRECTORY = pathlib.Path(__file__).parent.resolve()
-XASBLOCKS_PATH = PARENT_DIRECTORY / "models" / "xasblock" / "v1.1.1"
+PARENT_DIRECTORY = pathlib.Path(__file__).parent.parent.resolve()
+XASBLOCKS_PATH = PARENT_DIRECTORY / "model_checkpoints" / "xasblock" / "v1.1.1"
 AVAILABLE_COMBINATIONS = [f.stem for f in XASBLOCKS_PATH.glob("*.ckpt")]
 
 
