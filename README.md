@@ -18,6 +18,10 @@ pip install -e .
 
 A web service is currently running at [Brookhaven National Lab](https://lightshowai.bnl.gov/)
 
+# Run web service locally
+Type in ```xas_ui``` after the conda environment is activated. You can run the command anywhere and don't have to be in the source code directory.
+
+
 # Funding acknowledgment
 This research is based upon work supported by the U.S. Department of Energy, Office of Science, Office Basic Energy Sciences, under Award Number FWP PS-030. This research used the Theory and Computation resources of the Center for Functional Nanomaterials (CFN), which is a U.S. Department of Energy Office of Science User Facility, at Brookhaven National Laboratory under Contract No. DE-SC0012704. The Software resulted from work developed under a U.S. Government Contract No. DE-SC0012704 and are subject to the following terms: the U.S. Government is granted for itself and others acting on its behalf a paid-up, nonexclusive, irrevocable worldwide license in this computer software and data to reproduce, prepare derivative works, and perform publicly and display publicly.
 
