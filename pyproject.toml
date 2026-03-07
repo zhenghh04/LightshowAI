@@ -44,7 +44,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-lightshow-serve = "lightshowai.xas_ui:serve"
+xas_ui = "lightshowai.xas_ui:serve"
     
 [tool.hatch.build.targets.wheel]
 packages = ["lightshowai"]
