@@ -240,7 +240,7 @@ def similarity(grid: np.ndarray, spect1: np.ndarray, spect2: np.ndarray, sim_typ
     elif sim_type == "coss_deriv":
         metric = cos_similar(np.gradient(spect1,grid), np.gradient(spect2,grid))        
     else:
-        raise Exception("Unknown sim_type")
+        raise Exception("Unknown sim_type:", sim_type)
     
     return metric
     
