@@ -1,0 +1,250 @@
+from base64 import b64encode
+import os
+import tempfile
+import pathlib
+from zipfile import ZipFile
+import pandas as pd
+import numpy as np
+
+import dash
+from dash import dcc, html
+import plotly.express as px
+from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
+from pymatgen.core.structure import Structure
+from mp_api.client import MPRester
+
+import crystal_toolkit.components as ctc
+from crystal_toolkit.helpers.layouts import (
+    Box,
+    Column,
+    Columns,
+    Loading
+)
+
+from lightshowai.models import predict
+
+
+app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
+                url_base_pathname="/omnixas/")
+server = app.server
+
+struct_component = ctc.StructureMoleculeComponent(id="st_vis", 
+                                                  show_image_button=False, 
+                                                  show_export_button=False)
+search_component = ctc.SearchComponent(id='mpid_search')
+upload_component = ctc.StructureMoleculeUploadComponent(id='file_loader')
+xas_plot = dcc.Graph(id='xas_plot')
+st_source = html.H1(id='st_source', children='No structure loaded yet')
+
+all_elements = ['Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu']
+ene_start = {'Ti': 4964.504, 'V': 5464.097, 'Cr': 5989.168, 'Mn': 6537.886, 
+             'Fe': 7111.23, 'Co': 7709.282, 'Ni': 8332.181, 'Cu': 8983.173}
+ene_grid = {el: np.linspace(start, start + 35, 141) for el, start in ene_start.items()}
+xas_model_names = [f'{el} FEFF' for el in all_elements] + ['Ti VASP', 'Cu VASP']
+absorber_dropdown = dcc.Dropdown(xas_model_names, clearable=False, value='Ti VASP', id='absorber')
+
+onmixas_layout = Columns([
+        Column(Box([Loading(search_component.layout()),
+                    Loading(upload_component.layout()),
+                    html.Br(), html.Br(),
+                    st_source,
+                    html.Br(), html.Br(),
+                    html.Div("Element and Theory:"),
+                    Loading(absorber_dropdown)],
+                style={"width": "350px"}), narrow=True),
+        Column(Loading(struct_component.layout(size="70%"))),
+        Column(Box([xas_plot,
+                    html.Button("Download POSCAR and Spectrum", id="download_btn"),
+                    dcc.Download(id="download_sink")]))
+    ],
+    desktop_only=False,
+    centered=False
+)
+
+
+@app.callback(
+    Output("download_sink", "data"),
+    Input("download_btn", "n_clicks"),
+    State(struct_component.id(), "data"),
+    State('absorber', 'value'),
+)
+def download_xas_prediction(n_clicks, st_data, el_type):  
+    if st_data is None:
+        raise PreventUpdate
+    el, theory = el_type.split(' ')
+    st = Structure.from_dict(st_data)
+    d_xas = st_data['xas']
+    specs_list = [ene_grid[el]] + list(d_xas.values())
+    avg_spec = np.stack(specs_list[1:]).mean(axis=0)
+    specs_list.append(avg_spec)
+    specs = np.stack(specs_list)
+    
+    site_idxs = ["Energy"] + [f'Atom #{int(i) + 1}' for i in d_xas.keys()] + ['Average']
+    df = pd.DataFrame(specs, index=site_idxs)
+    with tempfile.TemporaryDirectory() as td:
+        tmpdir = pathlib.Path(td)
+        if len(d_xas) == 0:
+            fn_spec = tmpdir / "no_spectrum.csv"
+        else:
+            fn_spec = tmpdir / "spectrum.csv"
+        fn_poscar = tmpdir / 'POSCAR'
+        files_to_zip = [fn_poscar, fn_spec]
+        st.to(fn_poscar, fmt='poscar')
+        df.to_csv(fn_spec, float_format="%.3f", header=False)
+        zip_fn = tmpdir / f'OmniXAS_{el}_{theory}_Prediction_{n_clicks}.zip'
+        with ZipFile(zip_fn, 
+                     mode="w") as zip_file:
+            for fn in files_to_zip:
+                zip_file.write(fn, arcname=fn.name)
+        bytes = b64encode((tmpdir / zip_fn).read_bytes()).decode("ascii")
+        download_data = {"content": bytes,
+                         "base64": True,
+                         "type": "application/zip",
+                         "filename": zip_fn.name}
+
+    return download_data
+
+
+@app.callback(
+    Output(struct_component.id(), "data", allow_duplicate=True),
+    Output(upload_component.id("upload_data"), "contents"),
+    Output('st_source', "children", allow_duplicate=True),
+    Input(search_component.id(), "data"),
+    State('absorber', 'value')
+)
+def update_structure_by_mpid(search_mpid: str, el_type) -> Structure: # pyright: ignore[reportRedeclaration]
+    if not search_mpid:
+        raise PreventUpdate
+    
+    with MPRester() as mpr:
+        st = mpr.get_structure_by_material_id(search_mpid)
+        if not isinstance(st, Structure):
+            raise Exception("mp_api MPRester.get_structure_by_material_id did not return a pymatgen \"Structure\" object. This has been observed to occur when using an outdated version of mp_api with a more recent version of emmet-core. For now, please use the versions specified by LightShow's pyproject.toml")
+        
+        print("Struct from material.")
+        
+    st_dict = decorate_structure_with_xas(st, el_type)
+    return st_dict, None, f"Current structure: {search_mpid}" # pyright: ignore[reportReturnType]
+
+
+def decorate_structure_with_xas(st: Structure, el_type):
+    absorbing_site, spectroscopy_type = el_type.split(' ')
+    st_dict = st.as_dict()
+    if absorbing_site in st.composition:
+        specs = predict(st, absorbing_site, spectroscopy_type)
+        st_dict['xas'] = specs
+    else:
+        st_dict['xas'] = {}
+    return st_dict
+
+
+@app.callback(
+    Output(struct_component.id(), "data", allow_duplicate=True),
+    Output('st_source', "children", allow_duplicate=True),
+    Input(upload_component.id(), "data"),
+    State(upload_component.id('upload_data'), 'filename'),
+    State('absorber', 'value')
+)
+def update_structure_by_file(upload_data: dict, fn, el_type) -> Structure:
+    if not upload_data:
+        raise PreventUpdate
+    st = Structure.from_dict(upload_data['data'])
+    st_dict = decorate_structure_with_xas(st, el_type)
+    return st_dict, f"Current structure: {fn}" # pyright: ignore[reportReturnType]
+
+
+@app.callback(
+    Output("xas_plot", "figure", allow_duplicate=True),
+    Input(struct_component.id(), "data"),
+    State('absorber', 'value')
+)
+def predict_average_xas(st_data: dict, el_type) -> Structure:
+    if not st_data:
+        raise PreventUpdate
+    specs = st_data['xas']
+    if len(specs) == 0:
+        fig = build_figure(None, el_type, is_average=True, no_element=True, sel_mismatch=False)
+    else:
+        specs = np.array(list(specs.values()))
+        spectrum = specs.mean(axis=0)
+        fig = build_figure(spectrum, el_type, is_average=True, no_element=False, sel_mismatch=False)
+    return fig # pyright: ignore[reportReturnType]
+
+
+def build_figure(spectrum, el_type, is_average, no_element, sel_mismatch):
+    element = el_type.split(" ")[0]
+    if spectrum is None:
+        ene = None
+    else:
+        ene = ene_grid[element]
+    if no_element:
+        title = f"This structure doesn't contain {element}"
+    elif sel_mismatch:
+        title = f"The selected atom is not a {element} atom"
+    elif is_average:
+        title = f'Average K-edge XANES Spectrum of {el_type}'
+    else:
+        title = f'K-edge XANES Spectrum for the selected {element} atom'
+    fig = px.scatter(x=ene, y=spectrum, title=title, 
+                     labels={'x': "Energy (eV)", "y": "Absorption"})
+    return fig
+
+
+@app.callback(
+    Output("xas_plot", "figure", allow_duplicate=True),
+    Input(struct_component.id('scene'), "selectedObject"),
+    State(struct_component.id(), 'data'),
+    State('absorber', 'value')
+)
+def predict_site_specific_xas(sel, st_data, el_type) -> Structure:
+    specs = st_data['xas']
+    element = el_type.split(' ')[0]
+    if len(specs) == 0:
+        fig = build_figure(None, el_type, is_average=False, no_element=True, sel_mismatch=False)
+    elif len(sel) == 0:
+        specs = np.array(list(specs.values()))
+        spectrum = specs.mean(axis=0)
+        fig = build_figure(spectrum, el_type, is_average=True, no_element=False, sel_mismatch=False)
+    else:
+        st = Structure.from_dict(st_data)
+        el_sel = sel[0]['tooltip'].split('(')[0].strip()
+        pos_sel = np.array([float(x) for x in sel[0]['tooltip'].split('(')[1].split(')')[0].split(',')])
+        frac_pos_sel = st.lattice.get_fractional_coords(pos_sel)
+        dist = st.lattice.get_all_distances(frac_pos_sel, st.frac_coords)
+        dist = dist[0]
+        i_site = np.argmin(dist)
+        assert dist[i_site] < 0.01
+        assert st[i_site].specie.symbol == el_sel # pyright: ignore[reportArgumentType]
+        if st[i_site].specie.symbol != element: # pyright: ignore[reportArgumentType]
+            fig = build_figure(None, el_type, is_average=False, no_element=False, sel_mismatch=True)
+        else:
+            spectrum = np.array(specs[str(i_site)])
+            fig = build_figure(spectrum, el_type, is_average=False, no_element=False, sel_mismatch=False)
+    return fig # pyright: ignore[reportReturnType]
+
+
+@app.callback(
+    Output(struct_component.id(), "data", allow_duplicate=True),
+    Input('absorber', 'value'),
+    State(struct_component.id(), "data")
+)
+def update_structure_by_mpid(el_type, st_data) -> Structure:
+    st = Structure.from_dict(st_data)
+    st_dict = decorate_structure_with_xas(st, el_type)
+    return st_dict # pyright: ignore[reportReturnType]
+    
+
+ctc.register_crystal_toolkit(app=app, layout=onmixas_layout)
+
+
+def serve():
+    if "MP_API_KEY" not in os.environ:
+        print("Environment variable MP_API_KEY not found, "
+              "please set your materials project API key to "
+              "this environment variable before running this app")
+        exit()
+    app.run(debug=False, port=8443, host='127.0.0.1')
+
+if __name__ == "__main__":
+    serve()

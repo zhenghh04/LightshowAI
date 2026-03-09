@@ -1,0 +1,57 @@
+[project]
+name = "LightshowAI"
+authors = [
+    {"name" = "Matthew R. Carbone", "email" = "mcarbone@bnl.gov"},
+    {"name" = "Deyu Lu", "email" = "dlu@bnl.gov"},
+    {"name" = "Christopher Kelly", "email" = "ckelly@bnl.gov"},
+    {"name" = "Sairam Sri Vatsavai", "email" = "ssrivatsa@bnl.gov"},
+    {"name" = "Xiaohui Qu", "email" = "xiaqu@bnl.gov"},
+    {"name" = "Chuntian Cao", "email" = "caochuntian@gmail.com"}
+]
+
+description = "Lightshowai is a web user interface to predict the x-ray absorption near edge structure (XANES) spectra using neural network models. "
+readme = "README.md"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+]
+
+requires-python = "==3.11.*"
+dependencies = [
+    "crystal_toolkit>=2024.10.22",
+    "dgl==2.1.0",
+    "dash==3.4.0",
+    "lightning>=2.4.0",
+    "matgl==0.8.5",
+    "mp-api==0.41.2",
+    "numpy<=1.26.4",
+    "pymatgen >=2024.3.1, <=2024.11.13",
+    "torch==2.2.0",
+    "torchdata==0.7.1",
+    "gunicorn>=23.0.0",
+    "gevent>=25.5.0",
+    "emmet-core==0.84.3rc0",
+]
+version = "0.0.1"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+xas_ui = "lightshowai.xas_ui:serve"
+    
+[tool.hatch.build.targets.wheel]
+packages = ["lightshowai"]
+
+exclude = [
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/.DS_Store",
+]
