@@ -49,7 +49,7 @@ from crystal_toolkit.helpers.layouts import (
 )
 
 from lightshowai.models import predict
-from lightshowai import compare_utils
+from lightshowai.postprocess import compare_utils
 
 
 app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
@@ -170,10 +170,10 @@ def get_spectrum_match_score(predicted_spectrum, exp_spectrum, element):
         comparison_end = comparison_start + erange
         
         # Debug output
-        print(f"=== Comparison Range Debug ===")
-        print(f"ML edge energy: {ml_edge_energy:.1f} eV")
-        print(f"Shift: {shift:.2f} eV")
-        print(f"Comparison range: {comparison_start:.1f} - {comparison_end:.1f} eV")
+        # print(f"=== Comparison Range Debug ===")
+        # print(f"ML edge energy: {ml_edge_energy:.1f} eV")
+        # print(f"Shift: {shift:.2f} eV")
+        # print(f"Comparison range: {comparison_start:.1f} - {comparison_end:.1f} eV")
         
         score = correlations.get(opt_metric, 0.0)
         if np.isnan(score) or np.isinf(score):
