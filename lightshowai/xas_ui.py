@@ -1033,7 +1033,6 @@ def download_xas_prediction(n_clicks, st_data, el_type):
 
 @app.callback(
     Output(struct_component.id(), "data", allow_duplicate=True),
-    Output(upload_component.id("upload_data"), "contents"),
     Output('st_source', "children", allow_duplicate=True),
     Input(search_component.id(), "data"),
     State('absorber', 'value')
@@ -1048,7 +1047,7 @@ def update_structure_by_mpid(search_mpid: str, el_type) -> Structure:
             raise Exception("mp_api MPRester.get_structure_by_material_id did not return a pymatgen Structure object.")
 
     st_dict = decorate_structure_with_xas(st, el_type)
-    return st_dict, None, f"Current structure: {search_mpid}"
+    return st_dict, f"Current structure: {search_mpid}"
 
 
 def decorate_structure_with_xas(st: Structure, el_type):
@@ -1060,21 +1059,6 @@ def decorate_structure_with_xas(st: Structure, el_type):
     else:
         st_dict['xas'] = {}
     return st_dict
-
-
-@app.callback(
-    Output(struct_component.id(), "data", allow_duplicate=True),
-    Output('st_source', "children", allow_duplicate=True),
-    Input(upload_component.id(), "data"),
-    State(upload_component.id('upload_data'), 'filename'),
-    State('absorber', 'value')
-)
-def update_structure_by_file(upload_data: dict, fn, el_type) -> Structure:
-    if not upload_data:
-        raise PreventUpdate
-    st = Structure.from_dict(upload_data['data'])
-    st_dict = decorate_structure_with_xas(st, el_type)
-    return st_dict, f"Current structure: {fn}"
 
 
 def parse_structure_file(contents, filename):
@@ -1162,7 +1146,6 @@ def handle_batch_upload(contents_list, filenames_list, exp_data, el_type, existi
         sort_metric = 'coss_deriv'
     
     has_exp_data = exp_data is not None and 'energy' in exp_data and 'absorption' in exp_data
-    print('============Has Exp Data', has_exp_data)
     
     element = el_type.split(' ')[0]
     
@@ -1192,9 +1175,6 @@ def handle_batch_upload(contents_list, filenames_list, exp_data, el_type, existi
                 continue
             
             # Generate XAS spectrum
-            print('Element', element)
-            print('El Type', el_type)
-            print(type(st))
             specs = predict(st, element, el_type.split(' ')[1])
             
             if len(specs) == 0:
@@ -1213,7 +1193,6 @@ def handle_batch_upload(contents_list, filenames_list, exp_data, el_type, existi
             # Compare with experimental data if available
             
             if has_exp_data:
-                print("Has Experimental Data", has_exp_data)
                 match_result = get_spectrum_match_score(predicted_spectrum, exp_data, element)
             else:
                 match_result = {
