@@ -1509,11 +1509,13 @@ def predict_site_specific_xas(sel, st_data, exp_data, el_type, energy_shift, com
         fig = build_figure_with_exp(spectrum, exp_data, el_type, is_average=True, no_element=False, sel_mismatch=False, energy_shift=shift, comparison_range=comparison_range, current_structure_id=current_structure_id)
     else:
         st = Structure.from_dict(st_data)
-        spheres = st._get_sites_to_draw()
-        spheres = list(spheres)
-        i_sphere = int(sel[0]['id'].split('--')[-1])
-        cur_sphere = spheres[i_sphere]
-        i_site = cur_sphere[0]
+        el_sel = sel[0]['tooltip'].split('(')[0].strip()
+        pos_sel = np.array([float(x) for x in sel[0]['tooltip'].split('(')[1].split(')')[0].split(',')])
+        frac_pos_sel = st.lattice.get_fractional_coords(pos_sel)
+        dist = st.lattice.get_all_distances(frac_pos_sel, st.frac_coords)
+        i_site = np.argmin(dist)
+        assert dist[i_site] < 0.01
+        assert st[i_site].specie.symbol == el_sel
         if st[i_site].specie.symbol != element:
             fig = build_figure_with_exp(None, exp_data, el_type, is_average=False, no_element=False, sel_mismatch=True, energy_shift=shift, comparison_range=comparison_range, current_structure_id=current_structure_id)
         else:
