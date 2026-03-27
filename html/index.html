@@ -94,8 +94,9 @@
 							src="assets/images/bnl-logo-white-2021.svg" />
 					</a>
 					<div id="siteTitleContainer">
-						<span style="display:block; margin:0; padding:0;">LightshowAI</span>
-						<span class="small" style="display:block; margin:0; padding:0;">A ML-enhanced interactive XANES
+						<span style="display:block; margin:0; padding:0; font-weight: 400;">LightshowAI</span>
+						<span class="small" style="display:block; margin:0; padding:0; font-weight: 400;">A ML-enhanced
+							interactive XANES
 							analysis environment</span>
 					</div>
 					<div id="bs-blurb">Graph neural network base XAS prediction
@@ -113,22 +114,58 @@
 
 		<!-- DO NOT MODIFY CODE ABOVE THIS POINT! -->
 
-		<style>
-			#dash-app {
-				min-height: 150vh;
-			}
+		<!-- script for iframe resizing -->
+		<script>
+			document.addEventListener('DOMContentLoaded', () => {
+				const iframe = document.getElementById('dash-app');
+				let resizeTimer;
 
-			@media screen and (max-width: 768px) {
-				#dash-app {
-					min-height: 250vh;
-				}
-			}
-		</style>
+				const resizeDashIframe = () => {
+					clearTimeout(resizeTimer);
+					resizeTimer = setTimeout(() => {
+						try {
+							const doc = iframe.contentDocument;
+							if (!doc) return;
 
-		<iframe id="dash-app" src="/omnixas/" width="100%" style="border:0; display:block;"></iframe>
+							// Calculate a dynamic minimum height based on the user's screen size.
+							// This uses 85% of their browser window's height (leaving room for your header)
+							const minHeight = window.innerHeight * 0.80;
 
-		<!-- Full-width wrapper for the gray background -->
-		<div style="background-color: #f5f5f5; width: 100%; padding: 40px 0;">
+							// 1. Temporarily set to the dynamic minimum instead of a hardcoded 850px
+							iframe.style.height = `${minHeight}px`;
+
+							// 2. Read the true scroll height of the inner content
+							const h = doc.body.scrollHeight;
+
+							// 3. Set the new height (with the dynamic fallback minimum)
+							iframe.style.height = `${Math.max(h, minHeight)}px`;
+						} catch (e) {
+							console.error("Iframe resize error:", e);
+						}
+					}, 200); // Debounce to prevent layout thrashing
+				};
+
+				iframe.addEventListener('load', () => {
+					resizeDashIframe();
+					try {
+						// ResizeObserver fires when the inner body dimensions change
+						new ResizeObserver(resizeDashIframe).observe(iframe.contentDocument.body);
+
+						// MutationObserver as a fallback
+						new MutationObserver(resizeDashIframe).observe(
+							iframe.contentDocument.body,
+							{ childList: true, subtree: true }
+						);
+					} catch (e) { }
+				});
+			});
+		</script>
+
+		<iframe id="dash-app" src="/omnixas/" scrolling="no"
+			style="width: 100%; border: 0; display: block; overflow: hidden; height: 80vh;">
+		</iframe>
+
+		<!-- <div style="background-color: #f5f5f5; width: 100%; padding: 40px 0;">
 			<div class="container_24">
 				<p>
 					<strong>Lightshowai</strong> is a web user interface to predict the x-ray absorption
@@ -181,12 +218,11 @@
 				</div>
 				<div class="clear"></div>
 			</div>
-		</div>
+		</div> -->
 
 
 		<!-- END OF PAGE CONTENT -->
 
-	</div>
 	</div>
 	<div id="topOfPage"><span class="fa fa-chevron-circle-up fa-lg topOfPageTrigger"></span></div>
 	<div class="footer" id="footer">

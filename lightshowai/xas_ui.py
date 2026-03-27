@@ -66,7 +66,7 @@ section_header_style = {
     "color": "#222",
     "marginBottom": "14px",
     "paddingBottom": "10px",
-    "borderBottom": "1px solid #eee",
+    "borderBottom": "2px solid #ddd",
     "fontFamily": base_font,
     "letterSpacing": "0.2px"
 }
@@ -402,6 +402,12 @@ onmixas_layout = html.Div([
         # Column 1: Input Controls
         Column(
             html.Div([
+                # XAS Model Prediction Card
+                html.Div([
+                    html.Div("XAS Model Prediction", style=section_header_style),
+                    Loading(absorber_dropdown),
+                ], style=card_style),
+
                 # Experimental Spectrum Upload Card
                 html.Div([
                     html.Div("Upload Experimental Spectrum", style=section_header_style),
@@ -474,11 +480,6 @@ onmixas_layout = html.Div([
                     html.Div(st_source, style={"marginTop": "10px"}),
                 ], style=card_style),
                 
-                # XAS Model Prediction Card
-                html.Div([
-                    html.Div("XAS Model Prediction", style=section_header_style),
-                    Loading(absorber_dropdown),
-                ], style=card_style),
                 
             ], style={"minWidth": "150px"}),
             style={"flex": "1", "minWidth": "150px", "padding": "0 6px"}
@@ -590,10 +591,9 @@ onmixas_layout = html.Div([
     "flexWrap": "wrap",
     "background": "linear-gradient(to bottom, #ffffff 0px, #f5f5f5 21px)",
     "minHeight": "100vh",
-    "padding": "12px",
+    "padding": "24px",
     "paddingTop": "36px",
-    "paddingLeft": "24px",
-    "paddingRight": "24px",
+    "paddingBottom": "16px",
     "fontFamily": base_font
 })
 
