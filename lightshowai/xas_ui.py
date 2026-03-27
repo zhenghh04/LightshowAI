@@ -56,6 +56,19 @@ app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
                 url_base_pathname="/omnixas/")
 server = app.server
 
+# visit count
+_VISITOR_COUNT_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "visitor_count.txt")
+
+@server.route("/api/visitor-count")
+def _visitor_count():
+    try:
+        count = int(open(_VISITOR_COUNT_FILE).read().strip()) if os.path.exists(_VISITOR_COUNT_FILE) else 0
+    except (ValueError, IOError):
+        count = 0
+    count += 1
+    open(_VISITOR_COUNT_FILE, "w").write(str(count))
+    return f'{{"count": {count}}}', 200, {"Content-Type": "application/json"}
+
 
 # Common styles
 base_font = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
@@ -358,18 +371,33 @@ exp_y_axis_dropdown = dcc.Dropdown(
 # Button to apply column selection and plot
 exp_apply_btn = html.Button(
     "Apply & Plot", 
-    id="exp_apply_btn",
+    id="exp_apply_btn", 
     style={
-        'padding': '10px 20px',
-        'fontSize': '13px',
-        'border': 'none',
-        'borderRadius': '6px',
-        'backgroundColor': '#333',
-        'color': 'white',
-        'cursor': 'pointer',
-        'fontWeight': '600',
-        'marginRight': '8px',
-        'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        **button_primary_style, 
+        "width": "48%", 
+        "height": "40px",
+        "padding": "0",
+        "fontSize": "13px",
+        "marginRight": "4%",
+        "display": "inline-block",
+        "boxSizing": "border-box",
+        "verticalAlign": "top"
+    }
+)
+
+clear_exp_btn = html.Button(
+    "Clear", 
+    id="clear_exp_btn", 
+    style={
+        **button_secondary_style, 
+        "width": "48%",            
+        "height": "40px",
+        "padding": "0",
+        "fontSize": "13px",
+        "marginRight": "0",
+        "display": "inline-block",
+        "boxSizing": "border-box",
+        "verticalAlign": "top"
     }
 )
 
@@ -381,20 +409,6 @@ exp_file_info = html.Div(id='exp_file_info', children='No experimental spectrum 
                              'marginTop': '10px',
                              'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
                          })
-
-# Button to clear experimental spectrum
-clear_exp_btn = html.Button("Clear", id="clear_exp_btn", 
-                            style={
-                                'fontSize': '12px',
-                                'padding': '8px 16px',
-                                'border': '1px solid #ddd',
-                                'borderRadius': '6px',
-                                'backgroundColor': 'white',
-                                'color': '#666',
-                                'cursor': 'pointer',
-                                'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-                            })
-
 
 onmixas_layout = html.Div([
     # Main content area
@@ -527,8 +541,7 @@ onmixas_layout = html.Div([
                             html.Span("0", style={"fontSize": "10px", "color": "#999", "position": "absolute", "left": "50%", "transform": "translateX(-50%)", "fontFamily": base_font}),
                             html.Span("+50 eV", style={"fontSize": "10px", "color": "#999", "fontFamily": base_font}),
                         ], style={"display": "flex", "justifyContent": "space-between", "position": "relative", "marginTop": "-5px"}),
-                        html.Button("Reset Shift", id="reset_shift_btn", style={**button_secondary_style, "marginTop": "10px", "fontSize": "11px", "padding": "6px 14px"}),
-                    ], id='energy_shift_container', style={"padding": "0 10px"}),
+                        html.Button("Reset Shift", id="reset_shift_btn", style={**button_secondary_style, "marginTop": "10px"})], id='energy_shift_container'),
                     
                     html.Hr(style={"margin": "20px 0", "border": "none", "borderTop": "1px solid #eee"}),
                     
@@ -550,16 +563,7 @@ onmixas_layout = html.Div([
                                 "fontSize": "13px",
                                 "color": "#333",
                             }),
-                            html.Button("Clear All", id="clear_scores_btn", style={
-                                "fontSize": "10px",
-                                "padding": "4px 10px",
-                                "border": "1px solid #ddd",
-                                "borderRadius": "4px",
-                                "backgroundColor": "white",
-                                "color": "#666",
-                                "cursor": "pointer",
-                                "marginLeft": "10px"
-                            }),
+                            html.Button("Clear All", id="clear_scores_btn", style={**button_secondary_style, "marginLeft": "10px"}),
                         ], style={
                             "display": "flex",
                             "alignItems": "center",
@@ -589,10 +593,9 @@ onmixas_layout = html.Div([
 ], style={
     "alignItems": "flex-start",
     "flexWrap": "wrap",
-    "background": "linear-gradient(to bottom, #ffffff 0px, #f5f5f5 21px)",
+    "background": "#f5f5f5",
     "minHeight": "100vh",
     "padding": "24px",
-    "paddingTop": "36px",
     "paddingBottom": "16px",
     "fontFamily": base_font
 })
@@ -896,8 +899,7 @@ def handle_file_upload(contents, clear_clicks, filename):
             "marginBottom": "10px"
         }),
         
-        html.Button("Update Column Names", id="exp_update_col_names_btn", 
-                   style={"fontSize": "11px", "padding": "4px 8px", "marginBottom": "10px"})
+        html.Button("Update Column Names", id="exp_update_col_names_btn", style={**button_secondary_style, "width": "100%", "height": "40px", "padding": "0", "fontSize": "13px", "marginBottom": "10px", "boxSizing": "border-box"})
     ])
     
     x_col_name = columns[default_x]['name'] if default_x < len(columns) else "Column 1"

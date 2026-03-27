@@ -82,7 +82,6 @@
 			</div>
 		</div>
 		<div class="clear"></div>
-		<div class="clear"></div>
 		<div id="stripe" style="margin-bottom: 0; padding-bottom: 6px;">
 			<div class="container_24" id="banner">
 				<div class="grid_24">
@@ -96,11 +95,13 @@
 					<div id="siteTitleContainer">
 						<span style="display:block; margin:0; padding:0; font-weight: 400;">LightshowAI</span>
 						<span class="small" style="display:block; margin:0; padding:0; font-weight: 400;">A ML-enhanced
-							interactive XANES
-							analysis environment</span>
+							interactive XANES analysis environment</span>
+						<p id="visitor-counter"
+							style="display:block; margin:0; padding:0; font-weight: 400; font-size: 0.4em;">
+							<span class="fa fa-eye"></span> Total visits: <span id="visitor-count">—</span>
+						</p>
 					</div>
-					<div id="bs-blurb">Graph neural network base XAS prediction
-					</div>
+					<div id="bs-blurb">Graph neural network base XAS prediction</div>
 					<a id="doeLogoLink" title="DOE Office of Science" href="http://science.energy.gov/">
 						<img class="DOElogo black" title="DOE Office of Science"
 							src="assets/images/logo-doe-black-500px.png" />
@@ -111,148 +112,112 @@
 			</div>
 		</div>
 
+		<div class="tabs" style="margin: 0; padding: 0; border: none;">
+			<ul style="border-radius: 0; padding-top: 10px;">
+				<li><a href="#app-tab">Demo</a></li>
+				<li><a href="#info-tab">About & License</a></li>
+			</ul>
 
-		<!-- DO NOT MODIFY CODE ABOVE THIS POINT! -->
+			<!-- lightshowai -->
+			<div id="app-tab" style="padding: 0;">
+				<script>
+					document.addEventListener('DOMContentLoaded', () => {
+						const iframe = document.getElementById('dash-app');
+						let currentHeight = window.innerHeight * 0.80;
 
-		<!-- script for iframe resizing -->
-		<script>
-			document.addEventListener('DOMContentLoaded', () => {
-				const iframe = document.getElementById('dash-app');
-				let resizeTimer;
+						const expandDashIframe = () => {
+							try {
+								const doc = iframe.contentDocument;
+								if (!doc) return;
+								const scrollH = doc.body.scrollHeight;
+								if (scrollH > currentHeight) {
+									currentHeight = scrollH;
+									iframe.style.height = `${currentHeight}px`;
+								}
+							} catch (e) { }
+						};
 
-				const resizeDashIframe = () => {
-					clearTimeout(resizeTimer);
-					resizeTimer = setTimeout(() => {
-						try {
-							const doc = iframe.contentDocument;
-							if (!doc) return;
+						window.forceDashResize = expandDashIframe;
 
-							// Calculate a dynamic minimum height based on the user's screen size.
-							// This uses 85% of their browser window's height (leaving room for your header)
-							const minHeight = window.innerHeight * 0.80;
-
-							// 1. Temporarily set to the dynamic minimum instead of a hardcoded 850px
-							iframe.style.height = `${minHeight}px`;
-
-							// 2. Read the true scroll height of the inner content
-							const h = doc.body.scrollHeight;
-
-							// 3. Set the new height (with the dynamic fallback minimum)
-							iframe.style.height = `${Math.max(h, minHeight)}px`;
-						} catch (e) {
-							console.error("Iframe resize error:", e);
-						}
-					}, 200); // Debounce to prevent layout thrashing
-				};
-
-				iframe.addEventListener('load', () => {
-					resizeDashIframe();
-					try {
-						// ResizeObserver fires when the inner body dimensions change
-						new ResizeObserver(resizeDashIframe).observe(iframe.contentDocument.body);
-
-						// MutationObserver as a fallback
-						new MutationObserver(resizeDashIframe).observe(
-							iframe.contentDocument.body,
-							{ childList: true, subtree: true }
-						);
-					} catch (e) { }
-				});
-			});
-		</script>
-
-		<iframe id="dash-app" src="/omnixas/" scrolling="no"
-			style="width: 100%; border: 0; display: block; overflow: hidden; height: 80vh;">
-		</iframe>
-
-		<!-- <div style="background-color: #f5f5f5; width: 100%; padding: 40px 0;">
-			<div class="container_24">
-				<p>
-					<strong>Lightshowai</strong> is a web user interface to predict the x-ray absorption
-					near edge structure (XANES) spectra using neural network models.
-					Currently, the models we provide are OmniXAS models of 3d transition
-					metal (Ti-Cu) K-edge at two levels of theory: FEFF model for all the
-					8 elements and VASP models for Ti and Cu only. We recommend users of
-					Lightshowai to cite the following references: Benchmark [Phys. Rev.
-					Materials 8, 013801 (2024)], Lightshow [Journal of Open Source
-					Software 8 (87), 5182 (2023)], and OmniXAS [Phys. Rev. Materials 9,
-					043803 (2025)]. Please contact <a href="mailto:dlu@bnl.gov">Deyu Lu (dlu@bnl.gov)</a> if you have
-					questions.
-				</p>
-				<div class="grid_12 alpha">
-					<h2>Funding acknowledgment</h2>
-					<p>This research is based upon work supported by the U.S. Department
-						of Energy, Office of Science, Office Basic Energy Sciences, under
-						Award Number FWP PS-030. This research used the Theory and
-						Computation resources of the Center for Functional Nanomaterials
-						(CFN), which is a U.S. Department of Energy Office of Science
-						User Facility, at Brookhaven National Laboratory under Contract
-						No. DE-SC0012704. The Software resulted from work developed under
-						a U.S. Government Contract No. DE-SC0012704 and are subject to the
-						following terms: the U.S. Government is granted for itself and
-						others acting on its behalf a paid-up, nonexclusive, irrevocable
-						worldwide license in this computer software and data to reproduce,
-						prepare derivative works, and perform publicly and display publicly.
-					</p>
-				</div>
-
-				<div class="grid_12 omega">
-					<h2>BSD 3-Clause License</h2>
-					<p style="font-size: 0.9em; color: #555;">THE SOFTWARE IS SUPPLIED "AS IS" WITHOUT WARRANTY OF ANY
-						KIND. THE
-						UNITED STATES, THE UNITED STATES DEPARTMENT OF ENERGY, AND THEIR
-						EMPLOYEES: (1) DISCLAIM ANY WARRANTIES, EXPRESS OR IMPLIED, INCLUDING
-						BUT NOT LIMITED TO ANY IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS
-						FOR A PARTICULAR PURPOSE, TITLE OR NON-INFRINGEMENT, (2) DO NOT
-						ASSUME ANY LEGAL LIABILITY OR RESPONSIBILITY FOR THE ACCURACY,
-						COMPLETENESS, OR USEFULNESS OF THE SOFTWARE, (3) DO NOT REPRESENT
-						THAT USE OF THE SOFTWARE WOULD NOT INFRINGE PRIVATELY OWNED RIGHTS,
-						(4) DO NOT WARRANT THAT THE SOFTWARE WILL FUNCTION UNINTERRUPTED,
-						THAT IT IS ERROR-FREE OR THAT ANY ERRORS WILL BE CORRECTED. IN NO
-						EVENT SHALL THE UNITED STATES, THE UNITED STATES DEPARTMENT OF ENERGY,
-						OR THEIR EMPLOYEES BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-						CONSEQUENTIAL, SPECIAL OR PUNITIVE DAMAGES OF ANY KIND OR NATURE
-						RESULTING FROM EXERCISE OF THIS LICENSE AGREEMENT OR THE USE OF
-						THE SOFTWARE.
-					</p>
-				</div>
-				<div class="clear"></div>
+						iframe.addEventListener('load', () => {
+							iframe.style.height = `${currentHeight}px`;
+							setInterval(expandDashIframe, 200);
+						});
+					});
+				</script>
+				<iframe id="dash-app" src="/omnixas/" scrolling="no"
+					style="width: 100%; border: 0; display: block; overflow: hidden; height: 80vh;"></iframe>
 			</div>
-		</div> -->
 
+			<!-- about/license/funding tab -->
+			<div id="info-tab" style="background-color: #f5f5f5; padding: 20px 0;">
+				<div class="container_24">
+					<h2 style="padding-top:12px">About</h2>
+					<p>
+						<strong>Lightshowai</strong> is a web user interface to predict the x-ray absorption
+						near edge structure (XANES) spectra using neural network models. Currently, the models we
+						provide are OmniXAS models of 3d transition metal (Ti-Cu) K-edge at two levels of theory: FEFF
+						model for all the 8 elements and VASP models for Ti and Cu only. We recommend users of
+						Lightshowai to cite the following references: Benchmark [Phys. Rev. Materials 8, 013801 (2024)],
+						Lightshow [Journal of Open Source Software 8 (87), 5182 (2023)], and OmniXAS [Phys. Rev.
+						Materials 9, 043803 (2025)]. Please contact <a href="mailto:dlu@bnl.gov">Deyu Lu
+							(dlu@bnl.gov)</a> if you have questions.
+					</p>
+					<div class="grid_12 alpha">
+						<h2>Funding acknowledgment</h2>
+						<p>This research is based upon work supported by the U.S. Department of Energy, Office of
+							Science, Office Basic Energy Sciences, under Award Number FWP PS-030. This research used the
+							Theory and Computation resources of the Center for Functional Nanomaterials (CFN), which is
+							a U.S. Department of Energy Office of Science User Facility, at Brookhaven National
+							Laboratory under Contract No. DE-SC0012704. The Software resulted from work developed under
+							a U.S. Government Contract No. DE-SC0012704 and are subject to the following terms: the U.S.
+							Government is granted for itself and others acting on its behalf a paid-up, nonexclusive,
+							irrevocable worldwide license in this computer software and data to reproduce, prepare
+							derivative works, and perform publicly and display publicly.</p>
+					</div>
 
+					<div class="grid_12 omega">
+						<h2>BSD 3-Clause License</h2>
+						<p style="font-size: 0.9em; color: #555;">THE SOFTWARE IS SUPPLIED "AS IS" WITHOUT WARRANTY OF
+							ANY KIND. THE UNITED STATES, THE UNITED STATES DEPARTMENT OF ENERGY, AND THEIR EMPLOYEES:
+							(1) DISCLAIM ANY WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY IMPLIED
+							WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE OR NON-INFRINGEMENT,
+							(2) DO NOT ASSUME ANY LEGAL LIABILITY OR RESPONSIBILITY FOR THE ACCURACY, COMPLETENESS, OR
+							USEFULNESS OF THE SOFTWARE, (3) DO NOT REPRESENT THAT USE OF THE SOFTWARE WOULD NOT INFRINGE
+							PRIVATELY OWNED RIGHTS, (4) DO NOT WARRANT THAT THE SOFTWARE WILL FUNCTION UNINTERRUPTED,
+							THAT IT IS ERROR-FREE OR THAT ANY ERRORS WILL BE CORRECTED. IN NO EVENT SHALL THE UNITED
+							STATES, THE UNITED STATES DEPARTMENT OF ENERGY, OR THEIR EMPLOYEES BE LIABLE FOR ANY DIRECT,
+							INDIRECT, INCIDENTAL, CONSEQUENTIAL, SPECIAL OR PUNITIVE DAMAGES OF ANY KIND OR NATURE
+							RESULTING FROM EXERCISE OF THIS LICENSE AGREEMENT OR THE USE OF THE SOFTWARE.</p>
+					</div>
+					<div class="clear"></div>
+				</div>
+			</div>
+		</div>
 		<!-- END OF PAGE CONTENT -->
 
 	</div>
 	<div id="topOfPage"><span class="fa fa-chevron-circle-up fa-lg topOfPageTrigger"></span></div>
-	<div class="footer" id="footer">
+	<div class="footer" id="footer" style="margin-top: 0;">
 		<div class="container_24">
 			<div class="grid_6">
 				<h3 id="BNL">Brookhaven National Laboratory</h3>
-				<p>PO Box 5000<br>
-					Upton, NY 11973-5000<br>
-					(631) 344-8000</p>
+				<p>PO Box 5000<br>Upton, NY 11973-5000<br>(631) 344-8000</p>
 				<p><a id="contactUs" class="extrasmall white button" href="https://www.bnl.gov/contact-us/">Contact
 						us</a></p>
 				<ul class="socialMediaIcons">
 					<li><a target="_blank" href="https://twitter.com/BrookhavenLab" title="Follow Us on 𝕏"><i
-								class="fa-brands fa-square-x-twitter fa-2x"></i></a>
-					</li>
+								class="fa-brands fa-square-x-twitter fa-2x"></i></a></li>
 					<li><a target="_blank" href="https://www.facebook.com/brookhavenlab"
-							title="Follow Us on Facebook"><span class="fa fa-facebook-square fa-2x"></span></a>
-					</li>
+							title="Follow Us on Facebook"><span class="fa fa-facebook-square fa-2x"></span></a></li>
 					<li><a target="_blank" href="https://www.instagram.com/brookhavenlab/"
-							title="Follow Us on Instagram"><span class="fa fa-instagram fa-2x"></span></a>
-					</li>
+							title="Follow Us on Instagram"><span class="fa fa-instagram fa-2x"></span></a></li>
 					<li><a target="_blank" href="https://www.linkedin.com/company/brookhavenlab/"
-							title="Follow Us on LinkedIn"><span class="fa fa-linkedin-square fa-2x"></span></a>
-					</li>
+							title="Follow Us on LinkedIn"><span class="fa fa-linkedin-square fa-2x"></span></a></li>
 					<li><a target="_blank" href="https://www.youtube.com/BrookhavenLab"
-							title="Follow Us on YouTube"><span class="fa fa-youtube-square fa-2x"></span></a>
-					</li>
+							title="Follow Us on YouTube"><span class="fa fa-youtube-square fa-2x"></span></a></li>
 					<li><a target="_blank" href="http://www.flickr.com/brookhavenlab/" title="Follow Us on Flickr"><span
-								class="fa fa-flickr fa-2x"></span></a>
-					</li>
+								class="fa fa-flickr fa-2x"></span></a></li>
 				</ul>
 			</div>
 			<div class="grid_3">
@@ -289,22 +254,44 @@
 			</div>
 			<div class="grid_7 prefix_1">
 				<h3 id="BSA">Brookhaven Science Associates</h3>
-				<p>Brookhaven Science Associates manages and operates Brookhaven
-					National Laboratory on behalf of the U.S. Department of Energy's
-					Office of Science. BSA is a partnership between Battelle and The
-					Research Foundation for the State University of New York on behalf
-					of Stony Brook University. | <a href="https://www.bnl.gov/about/bsa.php">More</a></p>
+				<p>Brookhaven Science Associates manages and operates Brookhaven National Laboratory on behalf of the
+					U.S. Department of Energy's Office of Science. BSA is a partnership between Battelle and The
+					Research Foundation for the State University of New York on behalf of Stony Brook University. | <a
+						href="https://www.bnl.gov/about/bsa.php">More</a></p>
 				<img id="bsaFooterLogo" alt="BSA logos" src="assets/images/logo-bsa-black-220px.png">
 			</div>
 			<div class="clear"></div>
 		</div>
 	</div>
+
 	<script src="assets/jquery//jquery.js"></script>
 	<script src="assets/jquery-ui/jquery-ui.min.js"></script>
 	<script src="assets/jquery-sidr/jquery.sidr.min.js"></script>
 	<script src='assets/jquery-cookie/jquery.cookie.js'></script>
 	<script src="assets/jquery-finger/dist/jquery.finger.min.js"></script>
 	<script src="assets/js/bnl.js"></script>
+
+	<script>
+		$(document).ready(function () {
+			$(".tabs").tabs({
+				activate: function (event, ui) {
+					// forces resize of the iframe when going back to the demo tab
+					if (ui.newPanel.attr('id') === 'app-tab' && window.forceDashResize) {
+						window.forceDashResize();
+					}
+				}
+			});
+
+			fetch('/api/visitor-count')
+				.then(function (r) { return r.json(); })
+				.then(function (data) {
+					document.getElementById('visitor-count').textContent = data.count;
+				})
+				.catch(function () {
+					document.getElementById('visitor-count').textContent = '—';
+				});
+		});
+	</script>
 </body>
 
 </html>
