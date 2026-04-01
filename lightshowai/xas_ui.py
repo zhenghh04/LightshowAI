@@ -50,11 +50,95 @@ from crystal_toolkit.helpers.layouts import (
 
 from lightshowai.models import predict
 from lightshowai.postprocess import compare_utils
-
+import redis
 
 app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
                 url_base_pathname="/omnixas/")
 server = app.server
+
+# visitor count code
+# env var for redis server, fallback for testing
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+
+# return amount of visitors, and update count
+@server.route("/visitor-count")
+def _visitor_count():
+    try:
+        count = redis_client.incr("omnixas:visitor_count")
+        
+    except redis.RedisError as e:
+        print(f"Redis error: {e}")
+        return '{"error": "Database unavailable"}', 503, {"Content-Type": "application/json"}
+
+    return f'{{"count": {count}}}', 200, {"Content-Type": "application/json"}
+
+# Common styles
+base_font = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+
+section_header_style = {
+    "fontWeight": "700",
+    "fontSize": "16px",
+    "color": "#222",
+    "marginBottom": "14px",
+    "paddingBottom": "10px",
+    "borderBottom": "2px solid #ddd",
+    "fontFamily": base_font,
+    "letterSpacing": "0.2px"
+}
+
+column_header_style = {
+    "fontWeight": "700",
+    "fontSize": "16px",
+    "color": "#111",
+    "marginBottom": "14px",
+    "paddingBottom": "10px",
+    "borderBottom": "2px solid #ddd",
+    "fontFamily": base_font,
+    "letterSpacing": "0.1px"
+}
+
+input_label_style = {
+    "fontSize": "13px",
+    "color": "#444",
+    "marginBottom": "6px",
+    "fontWeight": "600",
+    "fontFamily": base_font
+}
+
+card_style = {
+    "backgroundColor": "white",
+    "borderRadius": "8px",
+    "padding": "18px",
+    "marginBottom": "12px",
+    "border": "1px solid #e8e8e8"
+}
+
+button_primary_style = {
+    'padding': '12px 24px',
+    'fontSize': '14px',
+    'border': 'none',
+    'borderRadius': '6px',
+    'backgroundColor': '#333',
+    'color': 'white',
+    'cursor': 'pointer',
+    'fontWeight': '600',
+    'marginRight': '8px',
+    'letterSpacing': '0.3px',
+    'fontFamily': base_font
+}
+
+button_secondary_style = {
+    'padding': '8px 16px',
+    'fontSize': '12px',
+    'border': '1px solid #ddd',
+    'borderRadius': '6px',
+    'backgroundColor': 'white',
+    'color': '#666',
+    'cursor': 'pointer',
+    'fontFamily': base_font
+}
+
 
 struct_component = ctc.StructureMoleculeComponent(id="st_vis", 
                                                   show_image_button=False, 
@@ -68,7 +152,7 @@ batch_upload_component = dcc.Upload(
     children=html.Div([
         html.Div([
             'Drag & Drop or ',
-            html.A('Select File(s)', style={'color': '#333', 'cursor': 'pointer', 'fontWeight': '500', 'textDecoration': 'underline'})
+            html.A('Select File(s)', style={'color': '#222', 'cursor': 'pointer', 'fontWeight': '600', 'textDecoration': 'underline'})
         ])
     ]),
     style={
@@ -83,8 +167,8 @@ batch_upload_component = dcc.Upload(
         'backgroundColor': '#fafafa',
         'cursor': 'pointer',
         'color': '#666',
-        'fontSize': '12px',
-        'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        'fontSize': '13px',
+        'fontFamily': base_font
     },
     multiple=True,  # Allow single or multiple file selection
     accept='.cif,.vasp,.poscar,.json'
@@ -93,8 +177,13 @@ batch_upload_component = dcc.Upload(
 # Store for batch processing status
 batch_processing_store = dcc.Store(id='batch_processing_store', data={'status': 'idle', 'processed': 0, 'total': 0})
 
-xas_plot = dcc.Graph(id='xas_plot')
-st_source = html.H1(id='st_source', children='No structure loaded yet')
+xas_plot = dcc.Graph(
+    id='xas_plot',
+    style={'height': '420px'},
+    config={'responsive': True}
+)
+st_source = html.Div(id='st_source', children='No structure loaded yet',
+                     style={'fontSize': '13px', 'color': '#555', 'fontWeight': '500', 'fontFamily': base_font})
 
 all_elements = ['Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu']
 ene_start = {'Ti': 4964.504, 'V': 5464.097, 'Cr': 5989.168, 'Mn': 6537.886, 
@@ -212,7 +301,7 @@ exp_upload_component = dcc.Upload(
     children=html.Div([
         html.Div([
             'Drag and Drop or ',
-            html.A('Select File', style={'color': '#333', 'cursor': 'pointer', 'fontWeight': '500', 'textDecoration': 'underline'})
+            html.A('Select File', style={'color': '#222', 'cursor': 'pointer', 'fontWeight': '600', 'textDecoration': 'underline'})
         ])
     ]),
     style={
@@ -227,8 +316,8 @@ exp_upload_component = dcc.Upload(
         'backgroundColor': '#fafafa',
         'cursor': 'pointer',
         'color': '#666',
-        'fontSize': '12px',
-        'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        'fontSize': '13px',
+        'fontFamily': base_font
     },
     multiple=False,
     accept='.dat,.mat,.csv,.xdi'
@@ -285,18 +374,33 @@ exp_y_axis_dropdown = dcc.Dropdown(
 # Button to apply column selection and plot
 exp_apply_btn = html.Button(
     "Apply & Plot", 
-    id="exp_apply_btn",
+    id="exp_apply_btn", 
     style={
-        'padding': '8px 16px',
-        'fontSize': '12px',
-        'border': 'none',
-        'borderRadius': '6px',
-        'backgroundColor': '#333',
-        'color': 'white',
-        'cursor': 'pointer',
-        'fontWeight': '500',
-        'marginRight': '8px',
-        'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        **button_primary_style, 
+        "width": "48%", 
+        "height": "40px",
+        "padding": "0",
+        "fontSize": "13px",
+        "marginRight": "4%",
+        "display": "inline-block",
+        "boxSizing": "border-box",
+        "verticalAlign": "top"
+    }
+)
+
+clear_exp_btn = html.Button(
+    "Clear", 
+    id="clear_exp_btn", 
+    style={
+        **button_secondary_style, 
+        "width": "48%",            
+        "height": "40px",
+        "padding": "0",
+        "fontSize": "13px",
+        "marginRight": "0",
+        "display": "inline-block",
+        "boxSizing": "border-box",
+        "verticalAlign": "top"
     }
 )
 
@@ -309,90 +413,12 @@ exp_file_info = html.Div(id='exp_file_info', children='No experimental spectrum 
                              'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
                          })
 
-# Button to clear experimental spectrum
-clear_exp_btn = html.Button("Clear", id="clear_exp_btn", 
-                            style={
-                                'fontSize': '12px',
-                                'padding': '8px 16px',
-                                'border': '1px solid #ddd',
-                                'borderRadius': '6px',
-                                'backgroundColor': 'white',
-                                'color': '#666',
-                                'cursor': 'pointer',
-                                'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-                            })
-
-# Common styles
-base_font = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-
-section_header_style = {
-    "fontWeight": "600",
-    "fontSize": "13px",
-    "color": "#333",
-    "marginBottom": "14px",
-    "paddingBottom": "10px",
-    "borderBottom": "1px solid #eee",
-    "fontFamily": base_font,
-    "letterSpacing": "0.2px"
-}
-
-column_header_style = {
-    "fontWeight": "600",
-    "fontSize": "13px",
-    "color": "#333",
-    "marginBottom": "14px",
-    "paddingBottom": "10px",
-    "borderBottom": "1px solid #eee",
-    "fontFamily": base_font,
-    "letterSpacing": "0.2px"
-}
-
-input_label_style = {
-    "fontSize": "12px",
-    "color": "#666",
-    "marginBottom": "6px",
-    "fontWeight": "500",
-    "fontFamily": base_font
-}
-
-card_style = {
-    "backgroundColor": "white",
-    "borderRadius": "8px",
-    "padding": "18px",
-    "marginBottom": "12px",
-    "border": "1px solid #e8e8e8"
-}
-
-button_primary_style = {
-    'padding': '10px 20px',
-    'fontSize': '13px',
-    'border': 'none',
-    'borderRadius': '6px',
-    'backgroundColor': '#333',
-    'color': 'white',
-    'cursor': 'pointer',
-    'fontWeight': '500',
-    'marginRight': '8px',
-    'fontFamily': base_font
-}
-
-button_secondary_style = {
-    'padding': '8px 16px',
-    'fontSize': '12px',
-    'border': '1px solid #ddd',
-    'borderRadius': '6px',
-    'backgroundColor': 'white',
-    'color': '#666',
-    'cursor': 'pointer',
-    'fontFamily': base_font
-}
-
 onmixas_layout = html.Div([
     # Main content area
     Columns([
         # Column 1: Input Controls
         Column(
-            html.Div([
+            [
                 # Experimental Spectrum Upload Card
                 html.Div([
                     html.Div("Upload Experimental Spectrum", style=section_header_style),
@@ -441,7 +467,6 @@ onmixas_layout = html.Div([
                     html.Div("Load Structure", style=section_header_style),
                     
                     # Single structure search
-                    html.Div("Search by Materials Project ID:", style={**input_label_style, "marginBottom": "8px"}),
                     Loading(search_component.layout()),
                     
                     html.Hr(style={"margin": "15px 0", "border": "none", "borderTop": "1px solid #eee"}),
@@ -466,31 +491,29 @@ onmixas_layout = html.Div([
                     html.Div(st_source, style={"marginTop": "10px"}),
                 ], style=card_style),
                 
-                # XAS Model Prediction Card
-                html.Div([
-                    html.Div("XAS Model Prediction", style=section_header_style),
-                    Loading(absorber_dropdown),
-                ], style=card_style),
                 
-            ], style={"width": "100%"}),
-            narrow=True,
+            ],
+            style={"flex": "1", "minWidth": "150px", "padding": "0 6px"}
         ),
         
         # Column 2: Crystal Structure Viewer
         Column(
-            html.Div([
+            [
                 html.Div([
                     html.Div("Crystal Structure Viewer", style=column_header_style),
-                    Loading(struct_component.layout(size="100%")),
-                ], style={
-                    "backgroundColor": "white",
-                    "borderRadius": "8px",
-                    "padding": "18px",
-                    "border": "1px solid #e8e8e8",
-                    "minHeight": "500px"
-                })
-            ]),
-            style={"flex": "1", "minWidth": "400px", "padding": "0 6px"}
+                    html.Div(
+                        Loading(struct_component.layout(size="100%")),
+                        style={'minHeight': '200px', 'width': '100%', 'position': 'relative'}
+                    )
+                ], style=card_style),
+                
+                # XAS Model Prediction Card
+                html.Div([
+                    html.Div("XAS Machine Learning Model", style=section_header_style),
+                    Loading(absorber_dropdown),
+                ], style=card_style)
+            ], 
+            style={"flex": "1.5", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
         ),
         
         # Column 3: Spectrum Analysis
@@ -523,8 +546,7 @@ onmixas_layout = html.Div([
                             html.Span("0", style={"fontSize": "10px", "color": "#999", "position": "absolute", "left": "50%", "transform": "translateX(-50%)", "fontFamily": base_font}),
                             html.Span("+50 eV", style={"fontSize": "10px", "color": "#999", "fontFamily": base_font}),
                         ], style={"display": "flex", "justifyContent": "space-between", "position": "relative", "marginTop": "-5px"}),
-                        html.Button("Reset Shift", id="reset_shift_btn", style={**button_secondary_style, "marginTop": "10px", "fontSize": "11px", "padding": "6px 14px"}),
-                    ], id='energy_shift_container', style={"padding": "0 10px"}),
+                        html.Button("Reset Shift", id="reset_shift_btn", style={**button_secondary_style, "marginTop": "10px"})], id='energy_shift_container'),
                     
                     html.Hr(style={"margin": "20px 0", "border": "none", "borderTop": "1px solid #eee"}),
                     
@@ -546,16 +568,7 @@ onmixas_layout = html.Div([
                                 "fontSize": "13px",
                                 "color": "#333",
                             }),
-                            html.Button("Clear All", id="clear_scores_btn", style={
-                                "fontSize": "10px",
-                                "padding": "4px 10px",
-                                "border": "1px solid #ddd",
-                                "borderRadius": "4px",
-                                "backgroundColor": "white",
-                                "color": "#666",
-                                "cursor": "pointer",
-                                "marginLeft": "10px"
-                            }),
+                            html.Button("Clear All", id="clear_scores_btn", style={**button_secondary_style, "marginLeft": "10px"}),
                         ], style={
                             "display": "flex",
                             "alignItems": "center",
@@ -575,22 +588,20 @@ onmixas_layout = html.Div([
                         sort_metric_store,
                     ]),
                     
-                ], style={
-                    "backgroundColor": "white",
-                    "borderRadius": "8px",
-                    "padding": "18px",
-                    "border": "1px solid #e8e8e8"
-                })
+                ], style=card_style)
             ]),
-            style={"flex": "1", "minWidth": "400px", "padding": "0 6px"}
+            style={"flex": "1.5", "minWidth": "150px", "padding": "0 6px"}
         ),
     ],
     desktop_only=False,
     centered=False),
 ], style={
-    "backgroundColor": "#f5f5f5",
+    "alignItems": "flex-start",
+    "flexWrap": "wrap",
+    "background": "#f5f5f5",
     "minHeight": "100vh",
-    "padding": "12px",
+    "padding": "24px",
+    "paddingBottom": "16px",
     "fontFamily": base_font
 })
 
@@ -893,8 +904,7 @@ def handle_file_upload(contents, clear_clicks, filename):
             "marginBottom": "10px"
         }),
         
-        html.Button("Update Column Names", id="exp_update_col_names_btn", 
-                   style={"fontSize": "11px", "padding": "4px 8px", "marginBottom": "10px"})
+        html.Button("Update Column Names", id="exp_update_col_names_btn", style={**button_secondary_style, "width": "100%", "height": "40px", "padding": "0", "fontSize": "13px", "marginBottom": "10px", "boxSizing": "border-box"})
     ])
     
     x_col_name = columns[default_x]['name'] if default_x < len(columns) else "Column 1"
@@ -1512,7 +1522,7 @@ def predict_site_specific_xas(sel, st_data, exp_data, el_type, energy_shift, com
         el_sel = sel[0]['tooltip'].split('(')[0].strip()
         pos_sel = np.array([float(x) for x in sel[0]['tooltip'].split('(')[1].split(')')[0].split(',')])
         frac_pos_sel = st.lattice.get_fractional_coords(pos_sel)
-        dist = st.lattice.get_all_distances(frac_pos_sel, st.frac_coords)
+        dist = st.lattice.get_all_distances(frac_pos_sel, st.frac_coords)[0]
         i_site = np.argmin(dist)
         assert dist[i_site] < 0.01
         assert st[i_site].specie.symbol == el_sel
@@ -1757,7 +1767,7 @@ def build_scores_table(scores, sort_metric='coss_deriv'):
                         "background": "none",
                         "cursor": "pointer",
                         "fontWeight": "700" if is_active else "600",
-                        "fontSize": "10px",
+                        "fontSize": "11px",
                         "color": "#333" if is_active else "#666",
                         "padding": "0",
                         "fontFamily": base_font,
