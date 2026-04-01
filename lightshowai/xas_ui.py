@@ -50,42 +50,26 @@ from crystal_toolkit.helpers.layouts import (
 
 from lightshowai.models import predict
 from lightshowai.postprocess import compare_utils
-import sqlite3
+import redis
 
 app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
                 url_base_pathname="/omnixas/")
 server = app.server
 
-# visit count
-_DB_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "visitor_count.db")
-
-# makes db file if doesnt exist, makes row for count if doesnt exist
-def _init_db():
-    with sqlite3.connect(_DB_FILE) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS visitors (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                count INTEGER DEFAULT 0
-            )
-        """)
-        conn.execute("INSERT OR IGNORE INTO visitors (id, count) VALUES (1, 0)")
-
-_init_db()
+# visitor count code
+# env var for redis server, fallback for testing
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 # return amount of visitors, and update count
 @server.route("/visitor-count")
 def _visitor_count():
     try:
-        with sqlite3.connect(_DB_FILE, isolation_level="IMMEDIATE") as conn:
-            conn.execute("UPDATE visitors SET count = count + 1 WHERE id = 1")
-            
-            cursor = conn.execute("SELECT count FROM visitors WHERE id = 1")
-            count = cursor.fetchone()[0]
-            
-    except sqlite3.Error:
-        return '{"error": "Database busy"}', 503, {"Content-Type": "application/json"}
+        count = redis_client.incr("omnixas:visitor_count")
+        
+    except redis.RedisError as e:
+        print(f"Redis error: {e}")
+        return '{"error": "Database unavailable"}', 503, {"Content-Type": "application/json"}
 
     return f'{{"count": {count}}}', 200, {"Content-Type": "application/json"}
 
