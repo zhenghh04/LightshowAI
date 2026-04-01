@@ -148,3 +148,6 @@ dmypy.json
 cython_debug/
 .vscode/settings.json
 .vscode/launch.json
+
+# sqlite file for visitor count
+visitor_count.db

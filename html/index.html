@@ -92,15 +92,11 @@
 						<img class="BNLlogo white-gray" title="BNL Homepage"
 							src="assets/images/bnl-logo-white-2021.svg" />
 					</a>
-					<div id="siteTitleContainer">
-						<span style="display:block; margin:0; padding:0; font-weight: 400;">LightshowAI</span>
-						<span class="small" style="display:block; margin:0; padding:0; font-weight: 400;">A ML-enhanced
-							interactive XANES analysis environment</span>
-						<p id="visitor-counter"
-							style="display:block; margin:0; padding:0; font-weight: 400; font-size: 0.4em;">
-							<span class="fa fa-eye"></span> Total visits: <span id="visitor-count">—</span>
-						</p>
-					</div>
+                    <div id="siteTitleContainer">
+                        <span style="display:block; margin:0; padding:0; font-weight: 400;">LightshowAI</span>
+                        <span class="small" style="display:block; margin:0; padding:0; font-weight: 400;">A ML-enhanced
+                            interactive XANES analysis environment</span>
+                    </div>
 					<div id="bs-blurb">Graph neural network base XAS prediction</div>
 					<a id="doeLogoLink" title="DOE Office of Science" href="http://science.energy.gov/">
 						<img class="DOElogo black" title="DOE Office of Science"
@@ -112,11 +108,15 @@
 			</div>
 		</div>
 
-		<div class="tabs" style="margin: 0; padding: 0; border: none;">
-			<ul style="border-radius: 0; padding-top: 10px;">
-				<li><a href="#app-tab">Demo</a></li>
-				<li><a href="#info-tab">About & License</a></li>
-			</ul>
+        <div class="tabs" style="margin: 0; padding: 0; border: none; position: relative;">
+            <div id="visitor-counter" class="desktop-counter">
+                <span class="fa fa-eye"></span> Total visits: <span id="visitor-count">—</span>
+            </div>
+
+            <ul style="border-radius: 0; padding-top: 10px;">
+                <li><a href="#app-tab">Demo</a></li>
+                <li><a href="#info-tab">About & License</a></li>
+            </ul>
 
 			<!-- lightshowai -->
 			<div id="app-tab" style="padding: 0;">
@@ -282,7 +282,7 @@
 				}
 			});
 
-			fetch('/api/visitor-count')
+			fetch('/visitor-count')
 				.then(function (r) { return r.json(); })
 				.then(function (data) {
 					document.getElementById('visitor-count').textContent = data.count;

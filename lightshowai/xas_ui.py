@@ -50,25 +50,44 @@ from crystal_toolkit.helpers.layouts import (
 
 from lightshowai.models import predict
 from lightshowai.postprocess import compare_utils
-
+import sqlite3
 
 app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
                 url_base_pathname="/omnixas/")
 server = app.server
 
 # visit count
-_VISITOR_COUNT_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "visitor_count.txt")
+_DB_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "visitor_count.db")
 
-@server.route("/api/visitor-count")
+# makes db file if doesnt exist, makes row for count if doesnt exist
+def _init_db():
+    with sqlite3.connect(_DB_FILE) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS visitors (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                count INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute("INSERT OR IGNORE INTO visitors (id, count) VALUES (1, 0)")
+
+_init_db()
+
+# return amount of visitors, and update count
+@server.route("/visitor-count")
 def _visitor_count():
     try:
-        count = int(open(_VISITOR_COUNT_FILE).read().strip()) if os.path.exists(_VISITOR_COUNT_FILE) else 0
-    except (ValueError, IOError):
-        count = 0
-    count += 1
-    open(_VISITOR_COUNT_FILE, "w").write(str(count))
-    return f'{{"count": {count}}}', 200, {"Content-Type": "application/json"}
+        with sqlite3.connect(_DB_FILE, isolation_level="IMMEDIATE") as conn:
+            conn.execute("UPDATE visitors SET count = count + 1 WHERE id = 1")
+            
+            cursor = conn.execute("SELECT count FROM visitors WHERE id = 1")
+            count = cursor.fetchone()[0]
+            
+    except sqlite3.Error:
+        return '{"error": "Database busy"}', 503, {"Content-Type": "application/json"}
 
+    return f'{{"count": {count}}}', 200, {"Content-Type": "application/json"}
 
 # Common styles
 base_font = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
@@ -415,13 +434,7 @@ onmixas_layout = html.Div([
     Columns([
         # Column 1: Input Controls
         Column(
-            html.Div([
-                # XAS Model Prediction Card
-                html.Div([
-                    html.Div("XAS Model Prediction", style=section_header_style),
-                    Loading(absorber_dropdown),
-                ], style=card_style),
-
+            [
                 # Experimental Spectrum Upload Card
                 html.Div([
                     html.Div("Upload Experimental Spectrum", style=section_header_style),
@@ -495,20 +508,28 @@ onmixas_layout = html.Div([
                 ], style=card_style),
                 
                 
-            ], style={"minWidth": "150px"}),
+            ],
             style={"flex": "1", "minWidth": "150px", "padding": "0 6px"}
         ),
         
         # Column 2: Crystal Structure Viewer
         Column(
-            html.Div([
-                html.Div("Crystal Structure Viewer", style=column_header_style),
-                html.Div(
-                    Loading(struct_component.layout(size="100%")),
-                    style={'minHeight': '200px', 'width': '100%', 'position': 'relative'}
-                )
-            ], style=card_style),
-            style={"flex": "1.5","padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
+            [
+                html.Div([
+                    html.Div("Crystal Structure Viewer", style=column_header_style),
+                    html.Div(
+                        Loading(struct_component.layout(size="100%")),
+                        style={'minHeight': '200px', 'width': '100%', 'position': 'relative'}
+                    )
+                ], style=card_style),
+                
+                # XAS Model Prediction Card
+                html.Div([
+                    html.Div("XAS Machine Learning Model", style=section_header_style),
+                    Loading(absorber_dropdown),
+                ], style=card_style)
+            ], 
+            style={"flex": "1.5", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
         ),
         
         # Column 3: Spectrum Analysis

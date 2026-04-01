@@ -4398,6 +4398,21 @@
 				border-bottom-color: #1A5B7D !important;
 			}
 
+			/* styling for visitor count to work on mobile */
+			.desktop-counter {
+				position: absolute; 
+				right: 20px; 
+				top: 0px; 
+				z-index: 10;
+			}
+			@media screen and (max-width: 768px) {
+				.desktop-counter {
+					position: static;
+					text-align: center;
+					padding-top: 10px;
+					padding-bottom: 5px;
+				}
+			}
 /*	----------------------------------------------------------------------------------------------------------------
 		END OF STYLE SHEET
 	----------------------------------------------------------------------------------------------------------------	*/
