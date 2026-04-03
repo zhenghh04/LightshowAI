@@ -57,15 +57,19 @@ app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
 server = app.server
 
 # visitor count code
-# env var for redis server, fallback for testing
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+redis_client = redis.Redis(
+    host=os.environ.get("REDIS_HOST"),
+    port=int(os.environ.get("REDIS_PORT", 6379)),
+    username=os.environ.get("REDIS_USER"),
+    password=os.environ.get("REDIS_PASSWORD"),
+    decode_responses=True
+)
 
 # return amount of visitors, and update count
 @server.route("/visitor-count")
 def _visitor_count():
     try:
-        count = redis_client.incr("omnixas:visitor_count")
+        count = redis_client.incr("app:visitor_count")
         
     except redis.RedisError as e:
         print(f"Redis error: {e}")
