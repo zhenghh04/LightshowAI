@@ -184,7 +184,7 @@ batch_processing_store = dcc.Store(id='batch_processing_store', data={'status': 
 xas_plot = dcc.Graph(
     id='xas_plot',
     style={'height': '420px'},
-    config={'responsive': True}
+    config={'responsive': True, 'doubleClick': 'reset'}
 )
 st_source = html.Div(id='st_source', children='No structure loaded yet',
                      style={'fontSize': '13px', 'color': '#555', 'fontWeight': '500', 'fontFamily': base_font})
@@ -453,6 +453,85 @@ onmixas_layout = html.Div([
                                 ], style={"display": "inline-block", "width": "48%", "verticalAlign": "top"}),
                             ]),
                             html.Div([
+                                html.Span("Data Format", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                
+                                dcc.Store(id='exp-data-type-store', data='norm'),
+                                
+                                html.Div([
+                                    html.Button(
+                                        "Normalized", 
+                                        id='btn-format-norm',
+                                        style={
+                                            'flex': '1',
+                                            'height': '40px',
+                                            'padding': '0',
+                                            'border': '1px solid #333',
+                                            'paddingRight': '8px',
+                                            'backgroundColor': '#333',
+                                            'color': 'white',
+                                            'borderRadius': '6px 0 0 6px',
+                                            'cursor': 'pointer',
+                                            'fontSize': '13px',
+                                            'fontWeight': '600',
+                                            'fontFamily': base_font,
+                                            'boxSizing': 'border-box'
+                                        }
+                                    ),
+                                    html.Button(
+                                        "Raw", 
+                                        id='btn-format-raw',
+                                        style={
+                                            'flex': '1',
+                                            'height': '40px',
+                                            'padding': '0',
+                                            'paddingLeft': '8px',
+                                            'border': '1px solid #ddd',
+                                            'borderLeft': 'none',
+                                            'backgroundColor': 'white',
+                                            'color': '#666',
+                                            'borderRadius': '0 6px 6px 0',
+                                            'cursor': 'pointer',
+                                            'fontSize': '13px',
+                                            'fontWeight': '400',
+                                            'fontFamily': base_font,
+                                            'boxSizing': 'border-box'
+                                        }
+                                    )
+                                ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'})
+                            ]),
+                            dcc.Store(id='exp-raw-type-store', data='fluor'),
+                            
+                            html.Div(
+                                id='raw-type-container',
+                                children=[
+                                    html.Span("Measurement Type", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                    html.Div([
+                                        html.Button(
+                                            "Fluorescent", 
+                                            id='btn-type-fluor',
+                                            style={
+                                                'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
+                                                'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
+                                                'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px',
+                                                'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                            }
+                                        ),
+                                        html.Button(
+                                            "Transmission", 
+                                            id='btn-type-trans',
+                                            style={
+                                                'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
+                                                'border': '1px solid #ddd', 'borderLeft': 'none', 'backgroundColor': 'white', 'color': '#666',
+                                                'borderRadius': '0 6px 6px 0', 'cursor': 'pointer', 'fontSize': '13px',
+                                                'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                            }
+                                        )
+                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'})
+                                ],
+                                style={'display': 'none'}
+                            ),
+
+                            html.Div([
                                 exp_apply_btn,
                                 clear_exp_btn,
                             ], style={"marginTop": "12px"}),
@@ -517,7 +596,7 @@ onmixas_layout = html.Div([
                     Loading(absorber_dropdown),
                 ], style=card_style)
             ], 
-            style={"flex": "1.5", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
+            style={"flex": "1.1", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
         ),
         
         # Column 3: Spectrum Analysis
@@ -809,6 +888,66 @@ def parse_file_columns(contents, filename):
         traceback.print_exc()
         return {'error': str(e)}
 
+@app.callback(
+    Output('exp-data-type-store', 'data'),
+    Output('btn-format-norm', 'style'),
+    Output('btn-format-raw', 'style'),
+    Output('raw-type-container', 'style'),
+    Input('btn-format-norm', 'n_clicks'),
+    Input('btn-format-raw', 'n_clicks'),
+    State('btn-format-norm', 'style'),
+    State('btn-format-raw', 'style'),
+    State('exp-data-type-store', 'data'),
+    prevent_initial_call=False
+)
+def update_format_toggle(norm_clicks, raw_clicks, norm_style, raw_style, current_val):
+    ctx = dash.callback_context
+    if ctx.triggered:
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger_id == 'btn-format-norm':
+            current_val = 'norm'
+        elif trigger_id == 'btn-format-raw':
+            current_val = 'raw'
+
+    if current_val == 'norm':
+        norm_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+        raw_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
+        container_style = {'display': 'none'}
+    else:
+        norm_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
+        raw_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+        container_style = {'display': 'block'}
+
+    return current_val, norm_style, raw_style, container_style
+
+@app.callback(
+    Output('exp-raw-type-store', 'data'),
+    Output('btn-type-fluor', 'style'),
+    Output('btn-type-trans', 'style'),
+    Input('btn-type-fluor', 'n_clicks'),
+    Input('btn-type-trans', 'n_clicks'),
+    State('btn-type-fluor', 'style'),
+    State('btn-type-trans', 'style'),
+    State('exp-raw-type-store', 'data'),
+    prevent_initial_call=False
+)
+def update_raw_type_toggle(fluor_clicks, trans_clicks, fluor_style, trans_style, current_val):
+    ctx = dash.callback_context
+    if ctx.triggered:
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger_id == 'btn-type-fluor':
+            current_val = 'fluor'
+        elif trigger_id == 'btn-type-trans':
+            current_val = 'trans'
+
+    if current_val == 'fluor':
+        fluor_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+        trans_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
+    else:
+        fluor_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
+        trans_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+
+    return current_val, fluor_style, trans_style
 
 @app.callback(
     Output('exp_raw_data_store', 'data'),
@@ -955,9 +1094,10 @@ def update_column_names(n_clicks, new_names, columns):
     State('exp_x_axis_dropdown', 'value'),
     State('exp_y_axis_dropdown', 'value'),
     State('exp_material_name', 'value'),
+    State('exp-data-type-store', 'data'),
     prevent_initial_call=True
 )
-def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, material_name):
+def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, material_name, data_type):
     """Apply column selection and create the spectrum data for plotting."""
     if n_clicks is None or raw_data is None:
         raise PreventUpdate
@@ -1426,19 +1566,30 @@ def build_figure_with_exp(predicted_spectrum, exp_data, el_type, is_average, no_
     )
     
     # Apply comparison range to x-axis to zoom into the comparison region
-    # Only apply if we have both experimental data and a valid comparison range
     if has_exp_data and comparison_range is not None and len(comparison_range) == 2:
         x_start, x_end = comparison_range
-        # Validate the range makes sense
-        if x_start < x_end and x_end - x_start > 5:  # At least 5 eV range
-            # Add 10% padding on each side for better visualization
-            range_width = x_end - x_start
-            padding = range_width * 0.1
+        if x_start < x_end and (x_end - x_start) > 5:
+            pad_x = (x_end - x_start) * 0.1
+            x_min, x_max = x_start - pad_x, x_end + pad_x
+            
             layout_config['xaxis'] = dict(
-                range=[x_start - padding, x_end + padding],
-                title=x_axis_label
+                range=[x_min, x_max], minallowed=x_min, maxallowed=x_max, 
+                autorange=False, title=x_axis_label
             )
-            print(f"=== Plot x-axis range set to: {x_start - padding:.1f} - {x_end + padding:.1f} eV ===")
+            
+            y_vals = np.concatenate([np.array(t.y)[(np.array(t.x) >= x_min) & (np.array(t.x) <= x_max)] 
+                                     for t in fig.data if t.x is not None and t.y is not None] or [[]])
+            
+            if y_vals.size > 0:
+                y_min, y_max = np.nanmin(y_vals), np.nanmax(y_vals)
+                pad_y = max((y_max - y_min) * 0.1, 0.1)
+                
+                layout_config['yaxis'] = dict(
+                    range=[y_min - pad_y, y_max + pad_y], minallowed=y_min - pad_y, 
+                    maxallowed=y_max + pad_y, autorange=False, title=y_axis_label
+                )
+            
+            print(f"=== Plot x-axis range set to: {x_min:.1f} - {x_max:.1f} eV ===")
     
     fig.update_layout(**layout_config)
     return fig
