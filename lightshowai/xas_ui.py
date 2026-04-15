@@ -50,6 +50,7 @@ from crystal_toolkit.helpers.layouts import (
 
 from lightshowai.models import predict
 from lightshowai.postprocess import compare_utils
+from lightshowai.postprocess.normalize import normalizeSpectrum, spectrum_from_new_csv
 import redis
 
 app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
@@ -384,6 +385,7 @@ exp_apply_btn = html.Button(
         "width": "48%", 
         "height": "40px",
         "padding": "0",
+        "margin-top": "6px",
         "fontSize": "13px",
         "marginRight": "4%",
         "display": "inline-block",
@@ -400,6 +402,7 @@ clear_exp_btn = html.Button(
         "width": "48%",            
         "height": "40px",
         "padding": "0",
+        "margin-top": "6px",
         "fontSize": "13px",
         "marginRight": "0",
         "display": "inline-block",
@@ -499,33 +502,42 @@ onmixas_layout = html.Div([
                                     )
                                 ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'})
                             ]),
-                            dcc.Store(id='exp-raw-type-store', data='fluor'),
-                            
-                            html.Div(
+
+                            dcc.Store(id='exp-raw-type-store', data='transmission'),
+                                html.Div(
                                 id='raw-type-container',
                                 children=[
                                     html.Span("Measurement Type", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
                                     html.Div([
-                                        html.Button(
-                                            "Fluorescent", 
-                                            id='btn-type-fluor',
-                                            style={
-                                                'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
-                                                'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
-                                                'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px',
-                                                'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                            }
-                                        ),
-                                        html.Button(
-                                            "Transmission", 
-                                            id='btn-type-trans',
-                                            style={
-                                                'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
-                                                'border': '1px solid #ddd', 'borderLeft': 'none', 'backgroundColor': 'white', 'color': '#666',
-                                                'borderRadius': '0 6px 6px 0', 'cursor': 'pointer', 'fontSize': '13px',
-                                                'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                            }
-                                        )
+                                        html.Button("Fluorescent", id="btn-type-fluor", style={
+                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
+                                            'border': '1px solid #ddd', 'borderRight': 'none', 'backgroundColor': 'white', 'color': '#666',
+                                            'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px', 
+                                            'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                        }),
+                                        html.Button("Transmission", id="btn-type-trans", style={
+                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
+                                            'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
+                                            'borderRadius': '0 6px 6px 0', 'cursor': 'pointer', 'fontSize': '13px', 
+                                            'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                        })
+                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'}),
+                                    
+                                    dcc.Store(id='exp-binning-store', data='yes'),
+                                    html.Span("Apply Binning", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                    html.Div([
+                                        html.Button("Yes", id='btn-binning-yes', style={
+                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
+                                            'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
+                                            'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px',
+                                            'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                        }),
+                                        html.Button("No", id='btn-binning-no', style={
+                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
+                                            'border': '1px solid #ddd', 'borderLeft': 'none', 'backgroundColor': 'white', 'color': '#666',
+                                            'borderRadius': '0 6px 6px 0', 'cursor': 'pointer', 'fontSize': '13px',
+                                            'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                        })
                                     ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'})
                                 ],
                                 style={'display': 'none'}
@@ -596,7 +608,7 @@ onmixas_layout = html.Div([
                     Loading(absorber_dropdown),
                 ], style=card_style)
             ], 
-            style={"flex": "1.1", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
+            style={"flex": "1.2", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
         ),
         
         # Column 3: Spectrum Analysis
@@ -863,23 +875,32 @@ def parse_file_columns(contents, filename):
         if len(columns) < 2:
             raise ValueError("File must have at least 2 columns for X and Y axes")
         
+        for col in columns:
+            name_lower = str(col['name']).lower().strip()
+            if name_lower in ['energy', 'e', 'ev']:
+                auto_x_col = col['index']
+            elif name_lower in ['iff', 'if', 'fluor', 'it', 'trans', 'absorption', 'mu']:
+                auto_y_col = col['index']
+
         auto_x_col = min(auto_x_col, len(columns) - 1)
         auto_y_col = min(auto_y_col, len(columns) - 1)
-        
         if auto_x_col == auto_y_col and len(columns) > 1:
             auto_y_col = 1 if auto_x_col == 0 else 0
         
         print(f"=== DEBUG: Found {len(columns)} columns")
-        for col in columns:
-            print(f"  Column {col['index']}: {col['name']} ({col['num_values']} values)")
         print(f"=== DEBUG: Auto-selected X={auto_x_col}, Y={auto_y_col}")
+        
+        col_names_lower = [str(col['name']).lower().strip() for col in columns]
+        is_new_csv = ("energy" in col_names_lower and "i0" in col_names_lower and 
+                      any(c in col_names_lower for c in ["iff", "it", "ir"]))
         
         return {
             'columns': columns,
             'data': data,
             'filename': filename,
             'auto_x_col': auto_x_col,
-            'auto_y_col': auto_y_col
+            'auto_y_col': auto_y_col,
+            'detected_format': 'new_xas_csv' if is_new_csv else 'generic_csv'
         }
         
     except Exception as e:
@@ -919,35 +940,6 @@ def update_format_toggle(norm_clicks, raw_clicks, norm_style, raw_style, current
         container_style = {'display': 'block'}
 
     return current_val, norm_style, raw_style, container_style
-
-@app.callback(
-    Output('exp-raw-type-store', 'data'),
-    Output('btn-type-fluor', 'style'),
-    Output('btn-type-trans', 'style'),
-    Input('btn-type-fluor', 'n_clicks'),
-    Input('btn-type-trans', 'n_clicks'),
-    State('btn-type-fluor', 'style'),
-    State('btn-type-trans', 'style'),
-    State('exp-raw-type-store', 'data'),
-    prevent_initial_call=False
-)
-def update_raw_type_toggle(fluor_clicks, trans_clicks, fluor_style, trans_style, current_val):
-    ctx = dash.callback_context
-    if ctx.triggered:
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger_id == 'btn-type-fluor':
-            current_val = 'fluor'
-        elif trigger_id == 'btn-type-trans':
-            current_val = 'trans'
-
-    if current_val == 'fluor':
-        fluor_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-        trans_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
-    else:
-        fluor_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
-        trans_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-
-    return current_val, fluor_style, trans_style
 
 @app.callback(
     Output('exp_raw_data_store', 'data'),
@@ -1084,6 +1076,34 @@ def update_column_names(n_clicks, new_names, columns):
     
     return columns, options, options, html.Span("Column names updated!", style={'color': 'green'})
 
+@app.callback(
+    Output('exp-binning-store', 'data'),
+    Output('btn-binning-yes', 'style'),
+    Output('btn-binning-no', 'style'),
+    Input('btn-binning-yes', 'n_clicks'),
+    Input('btn-binning-no', 'n_clicks'),
+    State('btn-binning-yes', 'style'),
+    State('btn-binning-no', 'style'),
+    State('exp-binning-store', 'data'),
+    prevent_initial_call=False
+)
+def update_binning_mode(yes_clicks, no_clicks, yes_style, no_style, current_val):
+    ctx = dash.callback_context
+    if ctx.triggered:
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger_id == 'btn-binning-yes':
+            current_val = 'yes'
+        elif trigger_id == 'btn-binning-no':
+            current_val = 'no'
+
+    if current_val == 'yes':
+        yes_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+        no_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
+    else:
+        yes_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
+        no_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+
+    return current_val, yes_style, no_style
 
 @app.callback(
     Output('exp_spectrum_store', 'data'),
@@ -1095,38 +1115,64 @@ def update_column_names(n_clicks, new_names, columns):
     State('exp_y_axis_dropdown', 'value'),
     State('exp_material_name', 'value'),
     State('exp-data-type-store', 'data'),
+    State('exp-raw-type-store', 'data'), 
+    State('exp-binning-store', 'data'),
     prevent_initial_call=True
 )
-def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, material_name, data_type):
+def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, material_name, data_type, raw_mode, bin_mode):
     """Apply column selection and create the spectrum data for plotting."""
     if n_clicks is None or raw_data is None:
         raise PreventUpdate
     
-    if x_col_idx is None or y_col_idx is None:
-        return None, html.Span("Please select both X and Y axis columns", style={'color': 'red'})
-    
     try:
-        data = raw_data['data']
         filename = raw_data['filename']
+        display_name = material_name.strip() if material_name and material_name.strip() else filename
         
-        x_data = np.array(data[x_col_idx])
-        y_data = np.array(data[y_col_idx])
-        
-        min_len = min(len(x_data), len(y_data))
-        x_data = x_data[:min_len]
-        y_data = y_data[:min_len]
-        
-        if len(x_data) < 2:
-            return None, html.Span("Not enough data points", style={'color': 'red'})
-        
-        sort_idx = np.argsort(x_data)
-        x_data = x_data[sort_idx]
-        y_data = y_data[sort_idx]
-        
-        x_label = columns[x_col_idx]['name']
-        y_label = columns[y_col_idx]['name']
-        
-        display_name = material_name if material_name and material_name.strip() else filename
+        if raw_data.get('detected_format') == 'new_xas_csv' and data_type == 'raw':
+            df = pd.DataFrame({col['name']: raw_data['data'][col['index']] for col in columns})
+            
+            apply_bin = (bin_mode == 'yes')
+            spec, meta = spectrum_from_new_csv(df, mode=raw_mode, apply_binning=apply_bin)            
+            spec = normalizeSpectrum(spec)
+            
+            x_data = spec[:, 0]
+            y_data = spec[:, 1]
+            x_label = meta['x_label']
+            y_label = f"Normalized μ(E) [{meta['mode'].capitalize()}]"
+
+        else:
+            if x_col_idx is None or y_col_idx is None:
+                return None, html.Span("Please select both X and Y axis columns", style={'color': 'red'})
+            
+            print(f"=== DEBUG: Manual plotting. X={x_col_idx}, Y={y_col_idx} ===")
+            data = raw_data['data']
+            x_data = np.array(data[x_col_idx], dtype=float)
+            y_data = np.array(data[y_col_idx], dtype=float)
+            
+            min_len = min(len(x_data), len(y_data))
+            x_data = x_data[:min_len]
+            y_data = y_data[:min_len]
+            
+            mask = np.isfinite(x_data) & np.isfinite(y_data)
+            x_data = x_data[mask]
+            y_data = y_data[mask]
+            
+            if len(x_data) < 2:
+                return None, html.Span("Not enough data points", style={'color': 'red'})
+            
+            sort_idx = np.argsort(x_data)
+            x_data = x_data[sort_idx]
+            y_data = y_data[sort_idx]
+            
+            x_label = columns[x_col_idx]['name']
+            y_label = columns[y_col_idx]['name']
+
+            if data_type == 'raw':
+                spec = np.column_stack((x_data, y_data))
+                spec = normalizeSpectrum(spec)
+                x_data = spec[:, 0]
+                y_data = spec[:, 1]
+                y_label = f"Normalized μ(E) [{y_label}]"
         
         result = {
             'energy': x_data.tolist(),
@@ -1137,15 +1183,17 @@ def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, ma
             'y_label': y_label
         }
         
-        x_min, x_max = x_data.min(), x_data.max()
+        x_min, x_max = float(np.min(x_data)), float(np.max(x_data))
         info_text = f"✓ {display_name} ({len(x_data)} points, {x_label}: {x_min:.1f}-{x_max:.1f})"
         
+        print(f"=== DEBUG: Plot ready. Output contains {len(x_data)} items. ===")
         return result, html.Span(info_text, style={'color': 'green'})
         
     except Exception as e:
         print(f"Error applying column selection: {e}")
+        import traceback
+        traceback.print_exc()
         return None, html.Span(f"Error: {str(e)}", style={'color': 'red'})
-
 
 @app.callback(
     Output("download_sink", "data"),
@@ -1747,6 +1795,37 @@ def handle_sort_click(n_clicks_list, current_sort_metric):
     
     return clicked_metric
 
+@app.callback(
+    Output('exp-raw-type-store', 'data'),
+    Output('btn-type-fluor', 'style'),
+    Output('btn-type-trans', 'style'),
+    Input('btn-type-fluor', 'n_clicks'),
+    Input('btn-type-trans', 'n_clicks'),
+    State('btn-type-fluor', 'style'),
+    State('btn-type-trans', 'style'),
+    State('exp-raw-type-store', 'data'),
+    prevent_initial_call=False
+)
+def update_measurement_mode(fluor_clicks, trans_clicks, fluor_style, trans_style, current_val):
+    ctx = dash.callback_context
+    if ctx.triggered:
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger_id == 'btn-type-fluor':
+            current_val = 'fluorescence'
+        elif trigger_id == 'btn-type-trans':
+            current_val = 'transmission'
+
+    if current_val == 'trans':
+        current_val = 'transmission'
+
+    if current_val == 'fluorescence':
+        fluor_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+        trans_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
+    else:
+        fluor_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
+        trans_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+
+    return current_val, fluor_style, trans_style
 
 @app.callback(
     Output('structure_scores_store', 'data'),
