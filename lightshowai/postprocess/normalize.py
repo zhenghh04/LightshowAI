@@ -11,50 +11,16 @@ def _find_columns(df_columns, aliases):
     # detects columns
     return [col for col in df_columns if str(col).strip().lower() in aliases]
 
-def bin_region(energy, mu, step, reducer="mean"):
-    # helper function to bin a specific region
-    ebin = np.round(energy / step) * step
-    return pd.DataFrame({"E": ebin, "mu": mu}).groupby("E", as_index=False).agg(reducer)
-
-def bin_xas(energy, mu):
-    # bins data similar to how Bruce's data looks
-
-    # create a rough binned version of raw data for edge detection
-    rough_dict = {'E': np.round(energy), 'mu': mu}
-    df_rough = pd.DataFrame(rough_dict)
-    df_rough = df_rough.groupby('E', as_index=False).mean()
-
-    # find derivative of the above binned version
-    mu_smoothed = df_rough['mu']
-    energy_smoothed = df_rough['E']
-    derivative = np.gradient(mu_smoothed, energy_smoothed)
-
-    # find the max of the derivative
-    max_slope_index = np.argmax(derivative)
-    e0 = df_rough['E'].iloc[max_slope_index]
-
-    regions = [
-        (energy <  e0 - 30, 5.0),
-        ((energy >= e0 - 30) & (energy < e0 - 15), 1.0),
-        ((energy >= e0 - 15) & (energy < e0 + 30), 0.25),
-        ((energy >= e0 + 30) & (energy < e0 + 100), 0.5),
-        (energy >= e0 + 100, 2.0),
-    ]
-
-    parts = []
-    for mask, step in regions:
-        if mask.any():
-            filtered_energy = energy[mask]
-            filtered_mu = mu[mask]
-            binned_part = bin_region(filtered_energy, filtered_mu, step)
-            parts.append(binned_part)
-            
-    spec_df = pd.concat(parts, ignore_index=True)
+def average_xas(energy, mu, interval=0.25):
+    """
+    Averages the XAS spectrum data over a fixed energy interval.
+    For example, interval=0.5 will average all points within each 0.5 eV block.
+    """
+    binned_energy = np.round(energy / interval) * interval
+    df = pd.DataFrame({'E': binned_energy, 'mu': mu})
+    final_df = df.groupby('E', as_index=False).mean()
     
-    spec_df['E'] = np.round(spec_df['E'], 3)
-    final_grouped_df = spec_df.groupby("E", as_index=False).mean()
-    
-    return final_grouped_df.to_numpy()
+    return final_df.to_numpy()
 
 def spectrum_from_new_csv(df: pd.DataFrame, mode: str = "transmission", apply_binning: bool = True):
     # from a csv file which contains raw data
@@ -89,7 +55,7 @@ def spectrum_from_new_csv(df: pd.DataFrame, mode: str = "transmission", apply_bi
     energy, mu = energy[mask], mu[mask]
 
     if apply_binning:
-        spec = bin_xas(energy, mu)
+        spec = average_xas(energy, mu)
     else:
         spec = pd.DataFrame({'E': np.round(energy, 2), 'mu': mu}).groupby('E', as_index=False).mean().to_numpy()
 
@@ -125,12 +91,15 @@ def smoothSpectrum(spect, smooth_width_eV=1.0):
     mu_grid = ius(grid)
         
     window_pts = int(round(smooth_width_eV / dE))
-    window_pts = window_pts + (1 if (window_pts %2 == 0) else 0)
+    window_pts = window_pts + (1 if (window_pts % 2 == 0) else 0)
+
+    if window_pts <= 3:
+        window_pts = 5
 
     mu_smooth = savgol_filter(mu_grid, window_pts, polyorder=3)
     return np.vstack( (grid, mu_smooth) ).T    
 
-def normalizeSpectrum(spec, output_curves=False, preedge_range: Tuple[float,float] | None = None, postedge_range: Tuple[float,float] | None = None, flatten=False):    
+def normalizeSpectrum(spec, output_curves=False, preedge_range: Tuple[float,float] | None = None, postedge_range: Tuple[float,float] | None = None, flatten=True):    
     """
     Normalize the spectrum
     Inputs:

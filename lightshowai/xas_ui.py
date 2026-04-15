@@ -524,21 +524,38 @@ onmixas_layout = html.Div([
                                     ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'}),
                                     
                                     dcc.Store(id='exp-binning-store', data='yes'),
-                                    html.Span("Apply Binning", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                    html.Span("Data Binning", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
                                     html.Div([
-                                        html.Button("Yes", id='btn-binning-yes', style={
+                                        html.Button("Average", id='btn-binning-yes', style={
                                             'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
                                             'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
                                             'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px',
                                             'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
                                         }),
-                                        html.Button("No", id='btn-binning-no', style={
+                                        html.Button("Raw", id='btn-binning-no', style={
                                             'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
                                             'border': '1px solid #ddd', 'borderLeft': 'none', 'backgroundColor': 'white', 'color': '#666',
                                             'borderRadius': '0 6px 6px 0', 'cursor': 'pointer', 'fontSize': '13px',
                                             'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
                                         })
-                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'})
+                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'}),
+
+                                    dcc.Store(id='exp-flatten-store', data='yes'),
+                                    html.Span('Flatten Spectrum', style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                    html.Div([
+                                        html.Button('Yes', id='btn-flatten-yes', style={
+                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
+                                            'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
+                                            'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px',
+                                            'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                        }),
+                                        html.Button('No', id='btn-flatten-no', style={
+                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
+                                            'border': '1px solid #ddd', 'borderLeft': 'none', 'backgroundColor': 'white',
+                                            'color': '#666', 'borderRadius': '0 6px 6px 0', 'cursor': 'pointer',
+                                            'fontSize': '13px', 'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
+                                        })
+                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'}),
                                 ],
                                 style={'display': 'none'}
                             ),
@@ -942,6 +959,35 @@ def update_format_toggle(norm_clicks, raw_clicks, norm_style, raw_style, current
     return current_val, norm_style, raw_style, container_style
 
 @app.callback(
+    Output('exp-flatten-store', 'data'),
+    Output('btn-flatten-yes', 'style'),
+    Output('btn-flatten-no', 'style'),
+    Input('btn-flatten-yes', 'n_clicks'),
+    Input('btn-flatten-no', 'n_clicks'),
+    State('btn-flatten-yes', 'style'),
+    State('btn-flatten-no', 'style'),
+    State('exp-flatten-store', 'data'),
+    prevent_initial_call=False
+)
+def update_flatten_mode(yes_clicks, no_clicks, yes_style, no_style, current_val):
+    ctx = dash.callback_context
+    if ctx.triggered:
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger_id == 'btn-flatten-yes':
+            current_val = 'yes'
+        elif trigger_id == 'btn-flatten-no':
+            current_val = 'no'
+
+    if current_val == 'yes':
+        yes_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+        no_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
+    else:
+        yes_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
+        no_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
+
+    return current_val, yes_style, no_style
+
+@app.callback(
     Output('exp_raw_data_store', 'data'),
     Output('exp_columns_store', 'data'),
     Output('exp_x_axis_dropdown', 'options'),
@@ -1117,9 +1163,10 @@ def update_binning_mode(yes_clicks, no_clicks, yes_style, no_style, current_val)
     State('exp-data-type-store', 'data'),
     State('exp-raw-type-store', 'data'), 
     State('exp-binning-store', 'data'),
+    State('exp-flatten-store', 'data'),
     prevent_initial_call=True
 )
-def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, material_name, data_type, raw_mode, bin_mode):
+def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, material_name, data_type, raw_mode, bin_mode, flattenmode):
     """Apply column selection and create the spectrum data for plotting."""
     if n_clicks is None or raw_data is None:
         raise PreventUpdate
@@ -1128,12 +1175,14 @@ def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, ma
         filename = raw_data['filename']
         display_name = material_name.strip() if material_name and material_name.strip() else filename
         
+        apply_flat = (flattenmode == 'yes')
+
         if raw_data.get('detected_format') == 'new_xas_csv' and data_type == 'raw':
             df = pd.DataFrame({col['name']: raw_data['data'][col['index']] for col in columns})
             
             apply_bin = (bin_mode == 'yes')
             spec, meta = spectrum_from_new_csv(df, mode=raw_mode, apply_binning=apply_bin)            
-            spec = normalizeSpectrum(spec)
+            spec = normalizeSpectrum(spec, flatten=apply_flat)
             
             x_data = spec[:, 0]
             y_data = spec[:, 1]
@@ -1169,7 +1218,7 @@ def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, ma
 
             if data_type == 'raw':
                 spec = np.column_stack((x_data, y_data))
-                spec = normalizeSpectrum(spec)
+                spec = normalizeSpectrum(spec, flatten=apply_flat)
                 x_data = spec[:, 0]
                 y_data = spec[:, 1]
                 y_label = f"Normalized μ(E) [{y_label}]"
