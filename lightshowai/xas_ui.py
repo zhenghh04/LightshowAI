@@ -53,7 +53,7 @@ from lightshowai.postprocess import compare_utils
 from lightshowai.postprocess.normalize import normalizeSpectrum, spectrum_from_new_csv
 from lightshowai.postprocess.shakeup import loadShakeupKernel, shakeup as shakeupSpectrum
 
-_DAT_PATH = pathlib.Path(__file__).parent / "Rutile-spfcn_model.dat"
+_DAT_PATH = pathlib.Path(__file__).parent / "postprocess" / "Rutile-spfcn_model.dat"
 _Aw = loadShakeupKernel(str(_DAT_PATH))
 
 import redis
