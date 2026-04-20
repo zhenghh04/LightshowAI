@@ -22,7 +22,7 @@ def average_xas(energy, mu, interval=0.25):
     
     return final_df.to_numpy()
 
-def spectrum_from_new_csv(df: pd.DataFrame, mode: str = "transmission", apply_binning: bool = True):
+def spectrum_from_new_csv(df: pd.DataFrame, mode: str = "transmission", apply_binning: bool = True, bin_interval: float = 0.25):
     # from a csv file which contains raw data
     energy_cols = _find_columns(df.columns, ["energy", "e", "ev"])
     i0_cols = _find_columns(df.columns, ["i0", "io"])
@@ -55,7 +55,7 @@ def spectrum_from_new_csv(df: pd.DataFrame, mode: str = "transmission", apply_bi
     energy, mu = energy[mask], mu[mask]
 
     if apply_binning:
-        spec = average_xas(energy, mu)
+        spec = average_xas(energy, mu, interval=bin_interval)
     else:
         spec = pd.DataFrame({'E': np.round(energy, 2), 'mu': mu}).groupby('E', as_index=False).mean().to_numpy()
 

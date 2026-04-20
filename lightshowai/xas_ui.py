@@ -51,6 +51,11 @@ from crystal_toolkit.helpers.layouts import (
 from lightshowai.models import predict
 from lightshowai.postprocess import compare_utils
 from lightshowai.postprocess.normalize import normalizeSpectrum, spectrum_from_new_csv
+from lightshowai.postprocess.shakeup import loadShakeupKernel, shakeup as shakeupSpectrum
+
+_DAT_PATH = pathlib.Path(__file__).parent / "postprocess" / "Rutile-spfcn_model.dat"
+_Aw = loadShakeupKernel(str(_DAT_PATH))
+
 import redis
 
 app = dash.Dash(prevent_initial_callbacks=True, title="OmniXAS@Lightshow.ai",
@@ -144,6 +149,43 @@ button_secondary_style = {
     'fontFamily': base_font
 }
 
+_radio_base = {
+    'flex': '1', 'height': '40px', 'padding': '0',
+    'cursor': 'pointer', 'fontSize': '13px',
+    'fontFamily': base_font, 'boxSizing': 'border-box'
+}
+
+radio_left_active_style = {
+    **_radio_base,
+    'border': '1px solid #333', 'borderRight': 'none',
+    'backgroundColor': '#333', 'color': 'white',
+    'borderRadius': '6px 0 0 6px', 'fontWeight': '600'
+}
+
+radio_left_inactive_style = {
+    **_radio_base,
+    'border': '1px solid #ddd', 'borderRight': 'none',
+    'backgroundColor': 'white', 'color': '#666',
+    'borderRadius': '6px 0 0 6px', 'fontWeight': '400'
+}
+
+radio_right_active_style = {
+    **_radio_base,
+    'border': '1px solid #333',
+    'backgroundColor': '#333', 'color': 'white',
+    'borderRadius': '0 6px 6px 0', 'fontWeight': '600'
+}
+
+radio_right_inactive_style = {
+    **_radio_base,
+    'border': '1px solid #ddd',
+    'backgroundColor': 'white', 'color': '#666',
+    'borderRadius': '0 6px 6px 0', 'fontWeight': '400'
+}
+
+radio_row_style = {'display': 'flex', 'width': '100%', 'marginBottom': '15px'}
+
+radio_label_style = {'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}
 
 struct_component = ctc.StructureMoleculeComponent(id="st_vis", 
                                                   show_image_button=False, 
@@ -179,6 +221,8 @@ batch_upload_component = dcc.Upload(
     accept='.cif,.vasp,.poscar,.json'
 )
 
+shakeup_store = dcc.Store(id='shakeup-store', data='no')
+
 # Store for batch processing status
 batch_processing_store = dcc.Store(id='batch_processing_store', data={'status': 'idle', 'processed': 0, 'total': 0})
 
@@ -210,6 +254,25 @@ METRIC_SHORT_NAMES = {
     "normed_wasserstein": "Wasser.",
 }
 
+# radio button helpers
+def _radio_btn_styles(is_left_active, left_extra=None, right_extra=None):
+    left  = {**(radio_left_active_style   if is_left_active else radio_left_inactive_style),  **(left_extra  or {})}
+    right = {**(radio_right_inactive_style if is_left_active else radio_right_active_style),   **(right_extra or {})}
+    return left, right
+
+def _radio_callback(btn_left_id, btn_right_id, val_left, val_right, current_val):
+    """
+    Resolve the new toggle value given which button was clicked.
+    Returns the new value string.
+    """
+    ctx = dash.callback_context
+    if ctx.triggered:
+        tid = ctx.triggered[0]['prop_id'].split('.')[0]
+        if tid == btn_left_id:
+            return val_left
+        if tid == btn_right_id:
+            return val_right
+    return current_val
 
 def get_spectrum_match_score(predicted_spectrum, exp_spectrum, element):
     """
@@ -340,7 +403,7 @@ exp_material_name_input = dcc.Input(
         'border': '1px solid #ddd',
         'fontSize': '12px',
         'boxSizing': 'border-box',
-        'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        'fontFamily': base_font
     }
 )
 
@@ -385,7 +448,7 @@ exp_apply_btn = html.Button(
         "width": "48%", 
         "height": "40px",
         "padding": "0",
-        "margin-top": "6px",
+        "marginTop": "6px",
         "fontSize": "13px",
         "marginRight": "4%",
         "display": "inline-block",
@@ -402,7 +465,7 @@ clear_exp_btn = html.Button(
         "width": "48%",            
         "height": "40px",
         "padding": "0",
-        "margin-top": "6px",
+        "marginTop": "6px",
         "fontSize": "13px",
         "marginRight": "0",
         "display": "inline-block",
@@ -417,7 +480,7 @@ exp_file_info = html.Div(id='exp_file_info', children='No experimental spectrum 
                              'fontSize': '11px', 
                              'color': '#888', 
                              'marginTop': '10px',
-                             'fontFamily': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                             'fontFamily': base_font
                          })
 
 onmixas_layout = html.Div([
@@ -456,106 +519,49 @@ onmixas_layout = html.Div([
                                 ], style={"display": "inline-block", "width": "48%", "verticalAlign": "top"}),
                             ]),
                             html.Div([
-                                html.Span("Data Format", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
-                                
+                                html.Span("Data Format", style=radio_label_style),
                                 dcc.Store(id='exp-data-type-store', data='norm'),
-                                
                                 html.Div([
-                                    html.Button(
-                                        "Normalized", 
-                                        id='btn-format-norm',
-                                        style={
-                                            'flex': '1',
-                                            'height': '40px',
-                                            'padding': '0',
-                                            'border': '1px solid #333',
-                                            'paddingRight': '8px',
-                                            'backgroundColor': '#333',
-                                            'color': 'white',
-                                            'borderRadius': '6px 0 0 6px',
-                                            'cursor': 'pointer',
-                                            'fontSize': '13px',
-                                            'fontWeight': '600',
-                                            'fontFamily': base_font,
-                                            'boxSizing': 'border-box'
-                                        }
-                                    ),
-                                    html.Button(
-                                        "Raw", 
-                                        id='btn-format-raw',
-                                        style={
-                                            'flex': '1',
-                                            'height': '40px',
-                                            'padding': '0',
-                                            'paddingLeft': '8px',
-                                            'border': '1px solid #ddd',
-                                            'borderLeft': 'none',
-                                            'backgroundColor': 'white',
-                                            'color': '#666',
-                                            'borderRadius': '0 6px 6px 0',
-                                            'cursor': 'pointer',
-                                            'fontSize': '13px',
-                                            'fontWeight': '400',
-                                            'fontFamily': base_font,
-                                            'boxSizing': 'border-box'
-                                        }
-                                    )
-                                ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'})
+                                    html.Button("Normalized", id='btn-format-norm', style=radio_left_active_style),
+                                    html.Button("Raw",        id='btn-format-raw',  style=radio_right_inactive_style),
+                                ], style=radio_row_style)
                             ]),
 
                             dcc.Store(id='exp-raw-type-store', data='transmission'),
                                 html.Div(
                                 id='raw-type-container',
                                 children=[
-                                    html.Span("Measurement Type", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                    html.Span("Measurement Type", style=radio_label_style),
                                     html.Div([
-                                        html.Button("Fluorescent", id="btn-type-fluor", style={
-                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
-                                            'border': '1px solid #ddd', 'borderRight': 'none', 'backgroundColor': 'white', 'color': '#666',
-                                            'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px', 
-                                            'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                        }),
-                                        html.Button("Transmission", id="btn-type-trans", style={
-                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
-                                            'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
-                                            'borderRadius': '0 6px 6px 0', 'cursor': 'pointer', 'fontSize': '13px', 
-                                            'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                        })
-                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'}),
+                                        html.Button("Fluorescent",  id="btn-type-fluor",  style=radio_left_inactive_style),
+                                        html.Button("Transmission", id="btn-type-trans",  style=radio_right_active_style),
+                                    ], style=radio_row_style),
                                     
-                                    dcc.Store(id='exp-binning-store', data='yes'),
-                                    html.Span("Data Binning", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                    dcc.Store(id='exp-binning-store', data=0.25),
+                                    html.Span("Bin Interval (eV)", style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
                                     html.Div([
-                                        html.Button("Average", id='btn-binning-yes', style={
-                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
-                                            'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
-                                            'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px',
-                                            'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                        }),
-                                        html.Button("Raw", id='btn-binning-no', style={
-                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
-                                            'border': '1px solid #ddd', 'borderLeft': 'none', 'backgroundColor': 'white', 'color': '#666',
-                                            'borderRadius': '0 6px 6px 0', 'cursor': 'pointer', 'fontSize': '13px',
-                                            'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                        })
-                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'}),
+                                        dcc.Slider(
+                                            id='binning-interval-slider',
+                                            min=0,
+                                            max=1.0,
+                                            step=0.05,
+                                            value=0.25,
+                                            marks={0: {'label': 'Raw', 'style': {'fontSize': '10px'}},
+                                                0.25: {'label': '0.25', 'style': {'fontSize': '10px'}},
+                                                0.5: {'label': '0.5', 'style': {'fontSize': '10px'}},
+                                                1.0: {'label': '1.0 eV', 'style': {'fontSize': '10px'}}},
+                                            tooltip={"placement": "bottom", "always_visible": False},
+                                            updatemode='mouseup',
+                                            included=False,
+                                        ),
+                                    ], style={'marginBottom': '15px', 'marginTop': '10px'}),
 
                                     dcc.Store(id='exp-flatten-store', data='yes'),
-                                    html.Span('Flatten Spectrum', style={'fontSize': '11px', 'display': 'block', 'marginBottom': '4px', 'color': '#666'}),
+                                    html.Span('Flatten Spectrum', style=radio_label_style),
                                     html.Div([
-                                        html.Button('Yes', id='btn-flatten-yes', style={
-                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingRight': '3px',
-                                            'border': '1px solid #333', 'backgroundColor': '#333', 'color': 'white',
-                                            'borderRadius': '6px 0 0 6px', 'cursor': 'pointer', 'fontSize': '13px',
-                                            'fontWeight': '600', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                        }),
-                                        html.Button('No', id='btn-flatten-no', style={
-                                            'flex': '1', 'height': '40px', 'padding': '0', 'paddingLeft': '3px',
-                                            'border': '1px solid #ddd', 'borderLeft': 'none', 'backgroundColor': 'white',
-                                            'color': '#666', 'borderRadius': '0 6px 6px 0', 'cursor': 'pointer',
-                                            'fontSize': '13px', 'fontWeight': '400', 'fontFamily': base_font, 'boxSizing': 'border-box'
-                                        })
-                                    ], style={'display': 'flex', 'width': '100%', 'marginBottom': '15px'}),
+                                        html.Button('Yes', id='btn-flatten-yes', style=radio_left_active_style),
+                                        html.Button('No',  id='btn-flatten-no',  style=radio_right_inactive_style),
+                                    ], style=radio_row_style),
                                 ],
                                 style={'display': 'none'}
                             ),
@@ -623,9 +629,21 @@ onmixas_layout = html.Div([
                 html.Div([
                     html.Div("XAS Machine Learning Model", style=section_header_style),
                     Loading(absorber_dropdown),
+                    shakeup_store,
+                    html.Div(
+                        id='shakeup-toggle-container',
+                        children=[
+                            html.Span("Shake-up Correction", style={**radio_label_style, 'marginTop': '12px'}),
+                            html.Div([
+                                html.Button("On",  id='btn-shakeup-on',  style=radio_left_inactive_style),
+                                html.Button("Off", id='btn-shakeup-off', style=radio_right_active_style),
+                            ], style={**radio_row_style, 'marginBottom': '0'}),
+                        ],
+                        style={'display': 'none'}
+                    ),
                 ], style=card_style)
             ], 
-            style={"flex": "1.2", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
+            style={"flex": "1", "padding": "0 6px", "minWidth": "150px", "alignSelf": "flex-start"}
         ),
         
         # Column 3: Spectrum Analysis
@@ -933,30 +951,14 @@ def parse_file_columns(contents, filename):
     Output('raw-type-container', 'style'),
     Input('btn-format-norm', 'n_clicks'),
     Input('btn-format-raw', 'n_clicks'),
-    State('btn-format-norm', 'style'),
-    State('btn-format-raw', 'style'),
     State('exp-data-type-store', 'data'),
-    prevent_initial_call=False
+    prevent_initial_call=False,
 )
-def update_format_toggle(norm_clicks, raw_clicks, norm_style, raw_style, current_val):
-    ctx = dash.callback_context
-    if ctx.triggered:
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger_id == 'btn-format-norm':
-            current_val = 'norm'
-        elif trigger_id == 'btn-format-raw':
-            current_val = 'raw'
+def update_format_toggle(_, __, current_val):
+    current_val = _radio_callback('btn-format-norm', 'btn-format-raw', 'norm', 'raw', current_val)
+    left, right = _radio_btn_styles(current_val == 'norm')
+    return current_val, left, right, {'display': 'none' if current_val == 'norm' else 'block'}
 
-    if current_val == 'norm':
-        norm_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-        raw_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
-        container_style = {'display': 'none'}
-    else:
-        norm_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
-        raw_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-        container_style = {'display': 'block'}
-
-    return current_val, norm_style, raw_style, container_style
 
 @app.callback(
     Output('exp-flatten-store', 'data'),
@@ -964,28 +966,53 @@ def update_format_toggle(norm_clicks, raw_clicks, norm_style, raw_style, current
     Output('btn-flatten-no', 'style'),
     Input('btn-flatten-yes', 'n_clicks'),
     Input('btn-flatten-no', 'n_clicks'),
-    State('btn-flatten-yes', 'style'),
-    State('btn-flatten-no', 'style'),
     State('exp-flatten-store', 'data'),
+    prevent_initial_call=False,
+)
+def update_flatten_mode(_, __, current_val):
+    current_val = _radio_callback('btn-flatten-yes', 'btn-flatten-no', 'yes', 'no', current_val)
+    left, right = _radio_btn_styles(current_val == 'yes')
+    return current_val, left, right
+
+
+@app.callback(
+    Output('exp-raw-type-store', 'data'),
+    Output('btn-type-fluor', 'style'),
+    Output('btn-type-trans', 'style'),
+    Input('btn-type-fluor', 'n_clicks'),
+    Input('btn-type-trans', 'n_clicks'),
+    State('exp-raw-type-store', 'data'),
+    prevent_initial_call=False,
+)
+def update_measurement_mode(_, __, current_val):
+    current_val = _radio_callback('btn-type-fluor', 'btn-type-trans', 'fluorescence', 'transmission', current_val)
+    left, right = _radio_btn_styles(current_val == 'fluorescence')
+    return current_val, left, right
+
+
+@app.callback(
+    Output('shakeup-store', 'data'),
+    Output('btn-shakeup-on', 'style'),
+    Output('btn-shakeup-off', 'style'),
+    Input('btn-shakeup-on', 'n_clicks'),
+    Input('btn-shakeup-off', 'n_clicks'),
+    State('shakeup-store', 'data'),
+    prevent_initial_call=False,
+)
+def update_shakeup_toggle(_, __, current_val):
+    current_val = _radio_callback('btn-shakeup-on', 'btn-shakeup-off', 'yes', 'no', current_val)
+    left, right = _radio_btn_styles(current_val == 'yes')
+    return current_val, left, right
+
+@app.callback(
+    Output('shakeup-toggle-container', 'style'),
+    Input('absorber', 'value'),
     prevent_initial_call=False
 )
-def update_flatten_mode(yes_clicks, no_clicks, yes_style, no_style, current_val):
-    ctx = dash.callback_context
-    if ctx.triggered:
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger_id == 'btn-flatten-yes':
-            current_val = 'yes'
-        elif trigger_id == 'btn-flatten-no':
-            current_val = 'no'
-
-    if current_val == 'yes':
-        yes_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-        no_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
-    else:
-        yes_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
-        no_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-
-    return current_val, yes_style, no_style
+def toggle_shakeup_visibility(el_type):
+    if el_type == 'Ti VASP':
+        return {'display': 'block'}
+    return {'display': 'none'}
 
 @app.callback(
     Output('exp_raw_data_store', 'data'),
@@ -1124,32 +1151,11 @@ def update_column_names(n_clicks, new_names, columns):
 
 @app.callback(
     Output('exp-binning-store', 'data'),
-    Output('btn-binning-yes', 'style'),
-    Output('btn-binning-no', 'style'),
-    Input('btn-binning-yes', 'n_clicks'),
-    Input('btn-binning-no', 'n_clicks'),
-    State('btn-binning-yes', 'style'),
-    State('btn-binning-no', 'style'),
-    State('exp-binning-store', 'data'),
+    Input('binning-interval-slider', 'value'),
     prevent_initial_call=False
 )
-def update_binning_mode(yes_clicks, no_clicks, yes_style, no_style, current_val):
-    ctx = dash.callback_context
-    if ctx.triggered:
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger_id == 'btn-binning-yes':
-            current_val = 'yes'
-        elif trigger_id == 'btn-binning-no':
-            current_val = 'no'
-
-    if current_val == 'yes':
-        yes_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-        no_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
-    else:
-        yes_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
-        no_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-
-    return current_val, yes_style, no_style
+def update_binning_mode(slider_val):
+    return slider_val if slider_val is not None else 0.25
 
 @app.callback(
     Output('exp_spectrum_store', 'data'),
@@ -1180,8 +1186,8 @@ def apply_column_selection(n_clicks, raw_data, columns, x_col_idx, y_col_idx, ma
         if raw_data.get('detected_format') == 'new_xas_csv' and data_type == 'raw':
             df = pd.DataFrame({col['name']: raw_data['data'][col['index']] for col in columns})
             
-            apply_bin = (bin_mode == 'yes')
-            spec, meta = spectrum_from_new_csv(df, mode=raw_mode, apply_binning=apply_bin)            
+            apply_bin = bin_mode > 0 if isinstance(bin_mode, (int, float)) else False
+            spec, meta = spectrum_from_new_csv(df, mode=raw_mode, apply_binning=apply_bin, bin_interval=bin_mode if apply_bin else 0.25)           
             spec = normalizeSpectrum(spec, flatten=apply_flat)
             
             x_data = spec[:, 0]
@@ -1286,9 +1292,10 @@ def download_xas_prediction(n_clicks, st_data, el_type):
     Output(struct_component.id(), "data", allow_duplicate=True),
     Output('st_source', "children", allow_duplicate=True),
     Input(search_component.id(), "data"),
-    State('absorber', 'value')
+    State('absorber', 'value'),
+    State('shakeup-store', 'data'),
 )
-def update_structure_by_mpid(search_mpid: str, el_type) -> Structure:
+def update_structure_by_mpid(search_mpid: str, el_type, shakeup_val) -> Structure:
     if not search_mpid:
         raise PreventUpdate
     
@@ -1297,20 +1304,31 @@ def update_structure_by_mpid(search_mpid: str, el_type) -> Structure:
         if not isinstance(st, Structure):
             raise Exception("mp_api MPRester.get_structure_by_material_id did not return a pymatgen Structure object.")
 
-    st_dict = decorate_structure_with_xas(st, el_type)
+    st_dict = decorate_structure_with_xas(st, el_type, apply_shakeup=(shakeup_val == 'yes'))
     return st_dict, f"Current structure: {search_mpid}"
 
 
-def decorate_structure_with_xas(st: Structure, el_type):
+def decorate_structure_with_xas(st: Structure, el_type, apply_shakeup=False):
     absorbing_site, spectroscopy_type = el_type.split(' ')
     st_dict = st.as_dict()
     if absorbing_site in st.composition:
         specs = predict(st, absorbing_site, spectroscopy_type)
+        if apply_shakeup and el_type == 'Ti VASP':
+            new_specs = {}
+            for k, v in specs.items():
+                orig_ene = ene_grid['Ti']
+                shaken = shakeupSpectrum(
+                    np.column_stack((orig_ene, v)),
+                    _Aw, pad_right=10, truncate_right=0.5
+                )
+                shaken_interp = np.interp(orig_ene, shaken[:, 0], shaken[:, 1])
+                new_specs[k] = shaken_interp.tolist()
+            specs = new_specs
+            
         st_dict['xas'] = specs
     else:
         st_dict['xas'] = {}
     return st_dict
-
 
 def parse_structure_file(contents, filename):
     """
@@ -1380,9 +1398,10 @@ def parse_structure_file(contents, filename):
     State('absorber', 'value'),
     State('structure_scores_store', 'data'),
     State('sort_metric_store', 'data'),
+    State('shakeup-store', 'data'),
     prevent_initial_call=True
 )
-def handle_batch_upload(contents_list, filenames_list, exp_data, el_type, existing_scores, sort_metric):
+def handle_batch_upload(contents_list, filenames_list, exp_data, el_type, existing_scores, sort_metric, shakeup_val):
     """
     Handle batch upload of multiple structure files.
     Parse each file, generate XAS spectrum, and compare with experimental data.
@@ -1428,6 +1447,14 @@ def handle_batch_upload(contents_list, filenames_list, exp_data, el_type, existi
             # Generate XAS spectrum
             specs = predict(st, element, el_type.split(' ')[1])
             
+            if shakeup_val == 'yes' and el_type == 'Ti VASP':
+                orig_ene = ene_grid['Ti']
+                new_specs = {}
+                for k, v in specs.items():
+                    shaken = shakeupSpectrum(np.column_stack((orig_ene, v)), _Aw, pad_right=10, truncate_right=0.5)
+                    new_specs[k] = np.interp(orig_ene, shaken[:, 0], shaken[:, 1]).tolist()
+                specs = new_specs
+
             if len(specs) == 0:
                 failed += 1
                 failed_files.append(f"{filename} (no spectrum)")
@@ -1790,13 +1817,14 @@ def predict_site_specific_xas(sel, st_data, exp_data, el_type, energy_shift, com
 @app.callback(
     Output(struct_component.id(), "data", allow_duplicate=True),
     Input('absorber', 'value'),
-    State(struct_component.id(), "data")
+    State(struct_component.id(), "data"),
+    Input('shakeup-store', 'data'),
 )
-def update_structure_by_absorber(el_type, st_data) -> Structure:
+def update_structure_by_absorber(el_type, st_data, shakeup_val) -> Structure:
     if st_data is None:
         raise PreventUpdate
     st = Structure.from_dict(st_data)
-    st_dict = decorate_structure_with_xas(st, el_type)
+    st_dict = decorate_structure_with_xas(st, el_type, apply_shakeup=(shakeup_val == 'yes'))
     return st_dict
 
 
@@ -1843,38 +1871,6 @@ def handle_sort_click(n_clicks_list, current_sort_metric):
         raise PreventUpdate
     
     return clicked_metric
-
-@app.callback(
-    Output('exp-raw-type-store', 'data'),
-    Output('btn-type-fluor', 'style'),
-    Output('btn-type-trans', 'style'),
-    Input('btn-type-fluor', 'n_clicks'),
-    Input('btn-type-trans', 'n_clicks'),
-    State('btn-type-fluor', 'style'),
-    State('btn-type-trans', 'style'),
-    State('exp-raw-type-store', 'data'),
-    prevent_initial_call=False
-)
-def update_measurement_mode(fluor_clicks, trans_clicks, fluor_style, trans_style, current_val):
-    ctx = dash.callback_context
-    if ctx.triggered:
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger_id == 'btn-type-fluor':
-            current_val = 'fluorescence'
-        elif trigger_id == 'btn-type-trans':
-            current_val = 'transmission'
-
-    if current_val == 'trans':
-        current_val = 'transmission'
-
-    if current_val == 'fluorescence':
-        fluor_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-        trans_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderLeft': 'none', 'fontWeight': '400'})
-    else:
-        fluor_style.update({'backgroundColor': 'white', 'color': '#666', 'border': '1px solid #ddd', 'borderRight': 'none', 'fontWeight': '400'})
-        trans_style.update({'backgroundColor': '#333', 'color': 'white', 'border': '1px solid #333', 'fontWeight': '600'})
-
-    return current_val, fluor_style, trans_style
 
 @app.callback(
     Output('structure_scores_store', 'data'),
