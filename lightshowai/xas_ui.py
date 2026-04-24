@@ -1404,11 +1404,17 @@ def download_selected_xas(n_clicks, st_data, el_type, all_scores, exp_data):
                     # but we can try to guess or use 'Active_Structure'
                     folder_name = st_data.get('label', 'Active_Structure')
                     
-                    site_idxs = ["Energy"] + [f'Atom #{int(i) + 1}' for i in d_xas.keys()]
                     if not d_xas:
+                        site_idxs = ["Energy"]
                         specs = np.array([ene_grid[el]])
                     else:
-                        specs = np.stack([ene_grid[el]] + [np.array(v) for v in d_xas.values()])
+                        site_idxs = ["Energy"] + [f'Atom #{int(i) + 1}' for i in d_xas.keys()] + ["Mean"]
+
+                        d_xas_values = [np.array(v) for v in d_xas.values()]
+                        specs_array = np.array(d_xas_values)
+                        mean_spectrum = specs_array.mean(axis=0)
+
+                        specs = np.stack([ene_grid[el]] + d_xas_values + [mean_spectrum])
                     
                     df = pd.DataFrame(specs.T, columns=site_idxs)
                     
