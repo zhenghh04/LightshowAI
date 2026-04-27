@@ -1,0 +1,25 @@
+[Unit]
+Description=LightshowAI XANES chatbot (Chainlit + Claude Agent SDK)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/agentic_workflows/examples/LightshowAI/aws/chatbot
+EnvironmentFile=/home/ubuntu/agentic_workflows/examples/LightshowAI/aws/chatbot/.env
+ExecStart=/home/ubuntu/venv-chatbot/bin/chainlit run app.py -h --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+# Headless flag (-h) suppresses the auto-open-browser prompt.
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/agentic_workflows/examples/LightshowAI /home/ubuntu/.chainlit /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
