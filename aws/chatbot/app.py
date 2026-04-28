@@ -354,6 +354,39 @@ async def _render_html_files(text: str) -> list[Path]:
     return artifacts
 
 
+def _recent_html_files(since_epoch_s: float) -> list[Path]:
+    """Find HTML artifacts created/updated under ~/tmp during this chat turn."""
+    files: list[Path] = []
+    for path in PLOT_DIR.rglob("*.html"):
+        try:
+            if not path.is_file():
+                continue
+            path.relative_to(PLOT_DIR.resolve())
+            if path.stat().st_mtime >= since_epoch_s:
+                files.append(path.resolve())
+        except OSError:
+            continue
+    return sorted(files, key=lambda p: p.stat().st_mtime)
+
+
+async def _render_recent_html_files(since_epoch_s: float) -> list[Path]:
+    """Inline-render new HTML artifacts even if the agent did not print paths."""
+    rendered = cl.user_session.get("rendered_html_paths")
+    if rendered is None:
+        rendered = set()
+        cl.user_session.set("rendered_html_paths", rendered)
+
+    artifacts: list[Path] = []
+    for html in _recent_html_files(since_epoch_s):
+        key = str(html)
+        if key in rendered:
+            continue
+        rendered.add(key)
+        artifacts.append(html)
+        await _send_inline_html(html)
+    return artifacts
+
+
 # --- User uploads -----------------------------------------------------------
 def _safe_path_part(value: str, default: str) -> str:
     """Return a filesystem-safe name while preserving useful extensions."""
@@ -592,6 +625,7 @@ async def on_message(message: cl.Message) -> None:
 
     run = _mlflow_start_turn(agent_prompt, user_id, session_id)
     t0 = time.monotonic()
+    turn_started_at = time.time() - 1.0
     tool_calls = 0
     tool_names: list[str] = []
     artifacts: list[Path] = []
@@ -635,6 +669,7 @@ async def on_message(message: cl.Message) -> None:
 
             await reply.update()
             artifacts.extend(await _render_html_files("".join(assistant_text)))
+            artifacts.extend(await _render_recent_html_files(turn_started_at))
     except TimeoutError:
         sys.stderr.write(
             f"[chatbot] chat turn timed out after {CHAT_TURN_TIMEOUT_S}s; "
