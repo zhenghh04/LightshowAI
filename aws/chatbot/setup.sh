@@ -19,6 +19,8 @@ echo "==> LightshowAI root: ${LIGHTSHOWAI_DIR}"
 echo "==> Chatbot dir:      ${CHATBOT_DIR}"
 echo "==> Venv target:      ${VENV}"
 
+mkdir -p "${HOME}/tmp"
+
 # --- 1. system packages ----------------------------------------------------
 echo "==> Installing system packages..."
 sudo apt-get update -y
@@ -66,6 +68,8 @@ Next steps:
 
   2. Open port 8000 in the EC2 security group
        Type: Custom TCP, Port: 8000, Source: My IP
+     For inline HTML plots, also open port 8001 and set PLOTS_PUBLIC_URL in .env
+     to http://<ec2-public-ip>:8001.
 
   3. Test interactively:
        cd ${CHATBOT_DIR}
@@ -75,8 +79,9 @@ Next steps:
   4. Or install as a systemd service (after editing the WorkingDirectory /
      EnvironmentFile / ReadWritePaths to match ${LIGHTSHOWAI_DIR} on this box):
        sudo cp ${CHATBOT_DIR}/lightshowai-chatbot.service /etc/systemd/system/
+       sudo cp ${CHATBOT_DIR}/lightshowai-plots.service /etc/systemd/system/
        sudo systemctl daemon-reload
-       sudo systemctl enable --now lightshowai-chatbot
+       sudo systemctl enable --now lightshowai-chatbot lightshowai-plots
        sudo journalctl -u lightshowai-chatbot -f
 
 URL: http://<ec2-public-ip>:8000

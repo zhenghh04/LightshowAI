@@ -88,9 +88,11 @@ if not (os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_
 #   tags   : session id
 #   artifacts: every HTML plot the tools produced
 #
-# Auth: AmSC MLflow uses bearer-token auth; the token comes from AM_SC_API_KEY
-# (same one used for the i2 gateway and the mlflow-amsc MCP). MLflow client
-# reads it from MLFLOW_TRACKING_TOKEN, so we mirror it.
+# Auth: AmSC MLflow rejects the standard Authorization: Bearer header (it
+# returns the HTML login page on /api/2.0/...). It expects an X-Api-Key
+# header instead. We monkey-patch mlflow.utils.rest_utils.http_request to
+# inject it on every request — same approach as the existing
+# examples/LightshowAI/mlflow_tracker.py.
 AM_SC_API_KEY = os.environ.get("AM_SC_API_KEY", "")
 MLFLOW_TRACKING_URI = os.environ.get(
     "MLFLOW_TRACKING_URI", "https://mlflow.american-science-cloud.org"
@@ -98,13 +100,31 @@ MLFLOW_TRACKING_URI = os.environ.get(
 MLFLOW_EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT", "LightshowAI-XANES-chatbot")
 MLFLOW_INSECURE_TLS = os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "true")
 
-if AM_SC_API_KEY:
-    os.environ.setdefault("MLFLOW_TRACKING_TOKEN", AM_SC_API_KEY)
 os.environ.setdefault("MLFLOW_TRACKING_INSECURE_TLS", MLFLOW_INSECURE_TLS)
+
+
+def _patch_mlflow_x_api_key(api_key: str) -> None:
+    """Inject X-Api-Key into every MLflow REST request (AmSC auth scheme)."""
+    import mlflow.utils.rest_utils as rest_utils
+    if getattr(rest_utils.http_request, "_amsc_patched", False):
+        return  # idempotent
+    original = rest_utils.http_request
+
+    def patched(host_creds, endpoint, method, *args, **kwargs):
+        headers = dict(kwargs.get("extra_headers") or {})
+        headers["X-Api-Key"] = api_key
+        kwargs["extra_headers"] = headers
+        kwargs.pop("headers", None)
+        return original(host_creds, endpoint, method, *args, **kwargs)
+
+    patched._amsc_patched = True  # type: ignore[attr-defined]
+    rest_utils.http_request = patched
+
 
 MLFLOW_ENABLED = bool(AM_SC_API_KEY and MLFLOW_TRACKING_URI)
 if MLFLOW_ENABLED:
     try:
+        _patch_mlflow_x_api_key(AM_SC_API_KEY)
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         mlflow.set_experiment(MLFLOW_EXPERIMENT)
         sys.stderr.write(
@@ -280,11 +300,11 @@ async def _render_html_files(text: str) -> list[Path]:
 
     artifacts: list[Path] = []
     for html in _extract_html_files(text):
-        artifacts.append(html)
         key = str(html)
         if key in rendered:
             continue
         rendered.add(key)
+        artifacts.append(html)
         await _send_inline_html(html)
     return artifacts
 
@@ -386,6 +406,7 @@ async def on_message(message: cl.Message) -> None:
     tool_names: list[str] = []
     artifacts: list[Path] = []
     assistant_text: list[str] = []
+    cl.user_session.set("rendered_html_paths", set())
 
     await client.query(message.content)
 
