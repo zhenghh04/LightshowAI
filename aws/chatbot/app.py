@@ -99,9 +99,27 @@ MLFLOW_TRACKING_URI = os.environ.get(
     "MLFLOW_TRACKING_URI", "https://mlflow.american-science-cloud.org"
 )
 MLFLOW_EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT", "LightshowAI-XANES-chatbot")
-MLFLOW_INSECURE_TLS = os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "true")
+MLFLOW_INSECURE_TLS = os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "false")
 
 os.environ.setdefault("MLFLOW_TRACKING_INSECURE_TLS", MLFLOW_INSECURE_TLS)
+
+
+def _is_enabled(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configure_mlflow_tls_warnings() -> None:
+    """Silence urllib3 warnings only when insecure TLS is explicitly enabled."""
+    if not _is_enabled(MLFLOW_INSECURE_TLS):
+        return
+    import urllib3
+    from urllib3.exceptions import InsecureRequestWarning
+
+    urllib3.disable_warnings(InsecureRequestWarning)
+    sys.stderr.write(
+        "[chatbot] WARNING: MLflow TLS verification is disabled because "
+        "MLFLOW_TRACKING_INSECURE_TLS is true.\n"
+    )
 
 
 def _patch_mlflow_x_api_key(api_key: str) -> None:
@@ -121,6 +139,8 @@ def _patch_mlflow_x_api_key(api_key: str) -> None:
     patched._amsc_patched = True  # type: ignore[attr-defined]
     rest_utils.http_request = patched
 
+
+_configure_mlflow_tls_warnings()
 
 MLFLOW_ENABLED = bool(AM_SC_API_KEY and MLFLOW_TRACKING_URI)
 if MLFLOW_ENABLED:

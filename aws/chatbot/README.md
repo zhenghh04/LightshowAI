@@ -98,6 +98,7 @@ sudo journalctl -u lightshowai-chatbot -f
 | `CHAINLIT_PASSWORD` | recommended | Shared password for collaborators. Blank ⇒ any non-empty username works. |
 | `CLAUDE_MODEL` | optional | Default `claude-opus-4-7`. Set to `claude-sonnet-4-6` if your key lacks 4-7 access (`400 Invalid model name`). |
 | `PLOTS_PUBLIC_URL` | recommended | Browser-visible URL for `~/tmp/*.html` artifacts served by `lightshowai-plots.service`, e.g. `http://<ec2-public-ip>:8001`. |
+| `MLFLOW_TRACKING_INSECURE_TLS` | optional | Default `false`. Set to `true` only as a temporary workaround for a certificate-chain problem. |
 
 ## Try it
 
@@ -124,6 +125,7 @@ stream the prose answer, and embed any `~/tmp/*.html` plots/viewers inline.
 | `400 Invalid model name passed in model=claude-opus-4-7` | Your key lacks Opus 4.7 access — set `CLAUDE_MODEL=claude-sonnet-4-6` in `.env` and restart |
 | Browser shows nothing at the URL | Port 8000 not allowed in the EC2 security group |
 | HTML plot message appears but iframe is blank | `lightshowai-plots.service` is not running, port 8001 is blocked, or `PLOTS_PUBLIC_URL` points somewhere the browser cannot reach |
+| Repeated `InsecureRequestWarning` from `urllib3` | Set `MLFLOW_TRACKING_INSECURE_TLS=false` in `.env` and restart. If TLS verification then fails, install/update CA certificates or fix the MLflow server certificate chain. |
 | `ANTHROPIC_API_KEY not set` on startup | `.env` not loaded — check the file exists and the systemd `EnvironmentFile=` path |
 | MCP "tool not found" | The MCP subprocess crashed — `journalctl -u lightshowai-chatbot` for stderr |
 | First inference call hangs 30–60 s | Loading 75 MB of OmniXAS weights into memory. One-time per process. |

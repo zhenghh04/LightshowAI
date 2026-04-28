@@ -142,7 +142,7 @@ def effective_max_results(max_results: int) -> int:
 # ── startup ───────────────────────────────────────────────────────────────────
 
 load_examples_env()
-os.environ.setdefault("MLFLOW_TRACKING_INSECURE_TLS", "true")
+os.environ.setdefault("MLFLOW_TRACKING_INSECURE_TLS", "false")
 configure_insecure_tls_warnings()
 enable_amsc_x_api_key()
 mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI))
@@ -267,7 +267,7 @@ def describe_server_config() -> dict:
     """Show effective MLflow connection config used by this MCP server."""
     return {
         "mlflow_tracking_uri": os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI),
-        "mlflow_tracking_insecure_tls": os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "true"),
+        "mlflow_tracking_insecure_tls": os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "false"),
         "has_am_sc_api_key": AMSC_API_KEY_ENV in os.environ and bool(os.environ.get(AMSC_API_KEY_ENV)),
         "default_max_results": int(os.environ.get("MLFLOW_MCP_MAX_RESULTS", str(DEFAULT_MAX_RESULTS))),
     }
