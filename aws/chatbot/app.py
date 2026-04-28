@@ -5,7 +5,7 @@ Wires the Claude Agent SDK to two local MCP stdio servers:
   - lightshowai     — OmniXAS XANES prediction tools
 
 Inline-renders any HTML files written by the tools (XANES plots, 3D structure
-viewers) by mounting ~/tmp/ at /plots and emitting an iframe custom element.
+viewers) by serving ~/tmp/ and emitting a raw iframe in the Chainlit message.
 
 Run locally:
     chainlit run app.py -h --port 8000
@@ -20,6 +20,7 @@ import re
 import sys
 import time
 import uuid
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
@@ -257,37 +258,27 @@ def _iframe_height(path: Path) -> int:
 
 
 async def _send_inline_html(path: Path) -> None:
-    """Render a saved HTML file inline and keep link/download fallbacks."""
+    """Render a saved HTML file inline and keep a full-page link fallback."""
     url = _html_url(path)
     size_kb = path.stat().st_size // 1024 if path.exists() else 0
     label = _html_label(path)
-    elements = []
-    custom_element = getattr(cl, "CustomElement", None)
-    if custom_element is not None:
-        elements.append(
-            custom_element(
-                name="iframe",
-                display="inline",
-                props={
-                    "src": url,
-                    "height": _iframe_height(path),
-                    "title": f"{label}: {path.name}",
-                },
-            )
-        )
-    else:
-        sys.stderr.write(
-            "[chatbot] cl.CustomElement unavailable; sending HTML as link/download only\n"
-        )
-    elements.append(cl.File(name=path.name, path=str(path), display="inline"))
+    src = escape(url, quote=True)
+    title = escape(f"{label}: {path.name}", quote=True)
+    iframe = (
+        f'<iframe src="{src}" title="{title}" '
+        f'style="width:100%;height:{_iframe_height(path)}px;'
+        'border:1px solid #243240;border-radius:8px;background:#fff;" '
+        'sandbox="allow-scripts allow-same-origin allow-popups allow-downloads" '
+        'loading="lazy" referrerpolicy="no-referrer"></iframe>'
+    )
 
     await cl.Message(
         content=(
             f"### {label}: [{path.name}]({url})\n\n"
-            f"Interactive HTML is rendered below. Open the link for a full-page "
-            f"view, or download the attached file ({size_kb} KB)."
+            f"{iframe}\n\n"
+            f"Open the link above for a full-page view or to save the HTML "
+            f"file ({size_kb} KB)."
         ),
-        elements=elements,
     ).send()
 
 
