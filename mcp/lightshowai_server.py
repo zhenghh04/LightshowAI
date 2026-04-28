@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import subprocess
@@ -64,22 +65,116 @@ def _get_model(element: str, spectroscopy_type: str):
         _model_cache[key] = XASBlockModule.load(element=element, spectroscopy_type=spectroscopy_type)
     return _model_cache[key]
 
-def _fetch_structure(material_id: str):
+def _object_value(obj: object, key: str):
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _plain_value(value: object):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _fetch_material_doc_and_structure(material_id: str):
     from mp_api.client import MPRester
     api_key = os.environ.get("MP_API_KEY")
     with MPRester(api_key) as mpr:
-        return mpr.get_structure_by_material_id(material_id)
+        doc = None
+        try:
+            doc = mpr.summary.get_data_by_id(material_id)
+        except Exception:
+            pass
+        structure = _object_value(doc, "structure") if doc is not None else None
+        if structure is None:
+            structure = mpr.get_structure_by_material_id(material_id)
+        return doc, structure
+
+
+def _material_metadata(doc: object, structure: object) -> dict:
+    symmetry = _object_value(doc, "symmetry")
+    meta = {
+        "formula": _object_value(doc, "formula_pretty") or structure.formula,
+        "energy_above_hull_eV_per_atom": _object_value(doc, "energy_above_hull"),
+        "band_gap_eV": _object_value(doc, "band_gap"),
+        "is_stable": _object_value(doc, "is_stable"),
+    }
+    if symmetry is not None:
+        meta.update(
+            {
+                "crystal_system": _object_value(symmetry, "crystal_system"),
+                "space_group": _object_value(symmetry, "symbol"),
+                "space_group_number": _object_value(symmetry, "number"),
+            }
+        )
+    return {key: _plain_value(value) for key, value in meta.items() if value is not None}
+
+
+def _energy_metadata(energy: list[float]) -> dict:
+    if not energy:
+        return {}
+    return {
+        "energy_start_eV": round(float(energy[0]), 3),
+        "energy_end_eV": round(float(energy[-1]), 3),
+        "energy_n_points": len(energy),
+        "energy_step_eV": round(
+            (float(energy[-1]) - float(energy[0])) / max(len(energy) - 1, 1),
+            3,
+        ),
+    }
+
+
+def _write_spectrum_csv(data: dict, output_path: str) -> str:
+    csv_path = str(Path(output_path).with_suffix(".csv"))
+    energy = data["energy_eV"]
+    site_spectra = data.get("site_spectra", {})
+    site_keys = sorted(site_spectra)
+    with Path(csv_path).open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["energy_eV", *[f"site_{key}" for key in site_keys], "mean"])
+        for idx, energy_value in enumerate(energy):
+            row = [energy_value]
+            for key in site_keys:
+                values = site_spectra.get(key, [])
+                row.append(values[idx] if idx < len(values) else "")
+            row.append(data["mean_spectrum"][idx])
+            writer.writerow(row)
+    return csv_path
+
+
+def _write_comparison_csv(
+    energy: list[float],
+    spectra: list[tuple[str, list[float]]],
+    output_path: str,
+) -> str:
+    csv_path = str(Path(output_path).with_suffix(".csv"))
+    with Path(csv_path).open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            ["energy_eV", *[f"mean_{material_id}" for material_id, _ in spectra]]
+        )
+        for idx, energy_value in enumerate(energy):
+            writer.writerow(
+                [
+                    energy_value,
+                    *[values[idx] if idx < len(values) else "" for _, values in spectra],
+                ]
+            )
+    return csv_path
+
 
 def _predict(material_id: str, absorbing_element: str, spectroscopy_type: str) -> dict:
     from lightshowai.models import predict
-    structure = _fetch_structure(material_id)
+    doc, structure = _fetch_material_doc_and_structure(material_id)
     spectra = predict(structure, absorbing_element, spectroscopy_type)
     energy = _ENE_GRID[absorbing_element].tolist()
     return {
         "material_id": material_id,
         "absorbing_element": absorbing_element,
         "spectroscopy_type": spectroscopy_type,
-        "formula": structure.formula,
+        **_material_metadata(doc, structure),
+        **_energy_metadata(energy),
         "energy_eV": energy,
         "site_spectra": {str(k): v.tolist() for k, v in spectra.items()},
         "mean_spectrum": np.mean(list(spectra.values()), axis=0).tolist(),
@@ -190,17 +285,29 @@ def plot_xanes(
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     fig.write_html(output_path)
+    spectrum_csv = _write_spectrum_csv(data, output_path)
 
     if open_browser:
         subprocess.Popen(["open", output_path])
 
     return json.dumps({
         "saved_to": output_path,
+        "spectrum_csv": spectrum_csv,
         "material_id": material_id,
         "formula": data["formula"],
         "absorbing_element": absorbing_element,
         "spectroscopy_type": spectroscopy_type,
         "n_sites": data["n_sites"],
+        "crystal_system": data.get("crystal_system"),
+        "space_group": data.get("space_group"),
+        "space_group_number": data.get("space_group_number"),
+        "energy_above_hull_eV_per_atom": data.get("energy_above_hull_eV_per_atom"),
+        "band_gap_eV": data.get("band_gap_eV"),
+        "is_stable": data.get("is_stable"),
+        "energy_start_eV": data.get("energy_start_eV"),
+        "energy_end_eV": data.get("energy_end_eV"),
+        "energy_n_points": data.get("energy_n_points"),
+        "energy_step_eV": data.get("energy_step_eV"),
     }, indent=2)
 
 
@@ -229,6 +336,7 @@ def compare_xanes(
 
     fig = go.Figure()
     results = []
+    mean_spectra: list[tuple[str, list[float]]] = []
 
     for mid in ids:
         try:
@@ -240,7 +348,18 @@ def compare_xanes(
                 name=f"{data['formula']} ({mid})",
                 line=dict(width=2),
             ))
-            results.append({"material_id": mid, "formula": data["formula"], "n_sites": data["n_sites"]})
+            mean_spectra.append((mid, data["mean_spectrum"]))
+            results.append({
+                "material_id": mid,
+                "formula": data["formula"],
+                "n_sites": data["n_sites"],
+                "crystal_system": data.get("crystal_system"),
+                "space_group": data.get("space_group"),
+                "space_group_number": data.get("space_group_number"),
+                "energy_above_hull_eV_per_atom": data.get("energy_above_hull_eV_per_atom"),
+                "band_gap_eV": data.get("band_gap_eV"),
+                "is_stable": data.get("is_stable"),
+            })
         except Exception as e:
             results.append({"material_id": mid, "error": str(e)})
 
@@ -262,11 +381,25 @@ def compare_xanes(
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     fig.write_html(output_path)
+    spectrum_csv = ""
+    if mean_spectra:
+        spectrum_csv = _write_comparison_csv(
+            _ENE_GRID[absorbing_element].tolist(),
+            mean_spectra,
+            output_path,
+        )
 
     if open_browser:
         subprocess.Popen(["open", output_path])
 
-    return json.dumps({"saved_to": output_path, "results": results}, indent=2)
+    return json.dumps({
+        "saved_to": output_path,
+        "spectrum_csv": spectrum_csv,
+        "absorbing_element": absorbing_element,
+        "spectroscopy_type": spectroscopy_type,
+        **_energy_metadata(_ENE_GRID[absorbing_element].tolist()),
+        "results": results,
+    }, indent=2)
 
 
 if __name__ == "__main__":

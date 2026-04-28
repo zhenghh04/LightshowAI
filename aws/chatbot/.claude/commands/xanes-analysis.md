@@ -19,7 +19,7 @@ The user may specify any of:
 - **Model** — `VASP` or `FEFF` (default: `VASP` if available for the element, else `FEFF`)
 - **Hull threshold** — max eV/atom above convex hull (default: `0.05`)
 - **Experimental data directory** — folder containing `*.dat` files (default: current working directory or `experiments/`)
-- **Output directory** — where to save HTML figure and PNG (default: `~/tmp/xanes_analysis`)
+- **Output directory** — where to save HTML figure and PNG (default: the `Current question output directory` injected by the Chainlit app, otherwise `~/tmp/xanes_analysis`)
 - **Max structures** — max number of Materials Project results to include (default: `5`; do not exceed `10` unless the user explicitly asks)
 
 ## Step 0: Check available models
@@ -52,8 +52,10 @@ For each structure, call `plot_xanes`:
 - `open_browser` = False
 - `output_path` = `<output_dir>/<mpid>_<formula>_<element>_<model>.html`
 
-Use `~/tmp/xanes_analysis` when the user does not name an output directory, so
-the Chainlit UI can discover and render generated HTML files.
+Use the `Current question output directory` from the message when present. If it
+is not present and the user does not name an output directory, use
+`~/tmp/xanes_analysis` so the Chainlit UI can discover and render generated HTML
+files.
 
 Report success/failure per structure. Skip silently failed structures with a warning.
 

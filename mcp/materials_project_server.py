@@ -131,7 +131,7 @@ async def mp_search_materials(
     num_sites_min: int | None = None,
     num_sites_max: int | None = None,
     spacegroup_symbol: str = "",
-    fields: str = "material_id,formula_pretty,band_gap,energy_above_hull,is_stable,symmetry",
+    fields: str = "material_id,formula_pretty,nsites,band_gap,energy_above_hull,is_stable,symmetry",
     limit: int = 10,
     sort_fields: str = "",
 ) -> str:

@@ -98,6 +98,7 @@ sudo journalctl -u lightshowai-chatbot -f
 | `CHAINLIT_PASSWORD` | recommended | Shared password for collaborators. Blank ⇒ any non-empty username works. |
 | `CLAUDE_MODEL` | optional | Default `claude-opus-4-7`. Set to `claude-sonnet-4-6` if your key lacks 4-7 access (`400 Invalid model name`). |
 | `PLOTS_PUBLIC_URL` | recommended | Browser-visible URL for `~/tmp/*.html` artifacts served by `lightshowai-plots.service`, e.g. `http://<ec2-public-ip>:8001`. |
+| `MLFLOW_EXPERIMENT` | optional | Default `LightshowAI-XANES-chatbot`. Parent chat runs and nested LightshowAI tool runs are written here. |
 | `MLFLOW_TRACKING_INSECURE_TLS` | optional | Default `false`. Set to `true` only as a temporary workaround for a certificate-chain problem. |
 | `MLFLOW_HTTP_REQUEST_TIMEOUT` | optional | Default `10`. Bounds MLflow network calls so logging cannot stall the chat for minutes. |
 | `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | optional | Default `1`. Keeps MLflow logging failures quick. |
@@ -114,6 +115,14 @@ After signing in:
 The agent will call the MCP tools, render each tool call as a collapsible *Step*,
 stream the prose answer, and embed any `~/tmp/*.html` plots/viewers inline.
 
+When `AM_SC_API_KEY` is set, each chat turn is logged to MLflow as a parent run
+with the full prompt, system prompt, response, uploaded files, rendered HTML
+artifacts, structured tool-call JSON, and collected Materials Project metadata.
+LightshowAI prediction tools also create nested MLflow runs with model metadata,
+material identifiers, formula/site/symmetry tags, energy-grid parameters,
+plot artifacts, sidecar spectrum CSV artifacts, and spectrum metrics for
+single-material predictions.
+
 ## Cost
 
 - **EC2 `t3.large`**: ~$60/mo always-on; ~$2/mo storage-only when stopped
@@ -129,6 +138,7 @@ stream the prose answer, and embed any `~/tmp/*.html` plots/viewers inline.
 | Browser shows nothing at the URL | Port 8000 not allowed in the EC2 security group |
 | HTML plot message appears but iframe is blank | `lightshowai-plots.service` is not running, port 8001 is blocked, or `PLOTS_PUBLIC_URL` points somewhere the browser cannot reach |
 | Agent asks for an experimental data path after upload | Restart after deploying this version. Uploaded files are copied to `~/tmp/uploads/<session>/...` and their paths are appended to the agent prompt. |
+| Old plots from previous questions appear | Restart after deploying this version. Each turn now gets a unique `~/tmp/turns/<session>/<turn>/` output directory, and auto-render fallback only scans that directory. |
 | Chat reply completes but UI stays busy for a while | MLflow logging is slow. Set `MLFLOW_HTTP_REQUEST_TIMEOUT=10` and `MLFLOW_HTTP_REQUEST_MAX_RETRIES=1`, or unset `AM_SC_API_KEY` to disable chatbot auto-logging. |
 | Empty assistant bubble never finishes | The Claude SDK turn is wedged. Set/keep `CHAINLIT_CHAT_TURN_TIMEOUT_S=900`; after timeout, refresh and start a new chat. |
 | Repeated `InsecureRequestWarning` from `urllib3` | Set `MLFLOW_TRACKING_INSECURE_TLS=false` in `.env` and restart. If TLS verification then fails, install/update CA certificates or fix the MLflow server certificate chain. |
