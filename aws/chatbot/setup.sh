@@ -1,27 +1,23 @@
 #!/bin/bash -e
-# One-shot installer for the LightshowAI chatbot on a fresh Ubuntu 22.04 EC2 box.
+# One-shot installer for the self-contained LightshowAI chatbot on Ubuntu 22.04.
 #
-# Assumes:
-#   - Ubuntu 22.04 (Amazon Linux: swap apt-get for dnf, package names differ)
-#   - Run as the `ubuntu` user (sudo where needed)
-#   - This script lives at <repo>/examples/LightshowAI/aws/chatbot/setup.sh and
-#     the repo has been cloned to ~/agentic_workflows (or wherever — paths are
-#     resolved from this script's location).
+# Expected layout (everything under one folder, no broader repo needed):
+#   <root>/lightshowai/        -- the python package
+#   <root>/model_checkpoints/  -- baked OmniXAS .ckpt files
+#   <root>/mcp/                -- materials_project + lightshowai MCP servers
+#   <root>/aws/chatbot/        -- this app
 #
-# After this finishes:
-#   chainlit run app.py -h --host 0.0.0.0 --port 8000
+# Run as the `ubuntu` user from anywhere; paths resolve from the script's location.
 
 set -euo pipefail
 
 CHATBOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${CHATBOT_DIR}/../../../.." && pwd)"
-LIGHTSHOWAI_DIR="${REPO_ROOT}/examples/LightshowAI"
+LIGHTSHOWAI_DIR="$(cd "${CHATBOT_DIR}/../.." && pwd)"
 VENV="${HOME}/venv-chatbot"
 
-echo "==> Repo root:    ${REPO_ROOT}"
-echo "==> Chatbot dir:  ${CHATBOT_DIR}"
-echo "==> LightshowAI:  ${LIGHTSHOWAI_DIR}"
-echo "==> Venv target:  ${VENV}"
+echo "==> LightshowAI root: ${LIGHTSHOWAI_DIR}"
+echo "==> Chatbot dir:      ${CHATBOT_DIR}"
+echo "==> Venv target:      ${VENV}"
 
 # --- 1. system packages ----------------------------------------------------
 echo "==> Installing system packages..."
@@ -29,9 +25,9 @@ sudo apt-get update -y
 sudo apt-get install -y \
     python3.11 python3.11-venv python3.11-dev \
     git build-essential cmake \
-    nodejs npm   # claude-agent-sdk shells out to a node-based MCP transport
+    nodejs npm    # claude-agent-sdk shells out to a node-based MCP transport
 
-# --- 2. claude-code CLI (claude_agent_sdk depends on it at runtime) --------
+# --- 2. claude-code CLI (claude_agent_sdk runtime dependency) --------------
 echo "==> Installing @anthropic-ai/claude-code CLI..."
 sudo npm install -g @anthropic-ai/claude-code
 
@@ -46,7 +42,7 @@ pip install --upgrade pip wheel
 echo "==> Installing chatbot requirements..."
 pip install -r "${CHATBOT_DIR}/requirements.txt"
 
-# --- 5. LightshowAI package (editable install from this repo) --------------
+# --- 5. LightshowAI package (editable install, picks up local checkpoints) -
 echo "==> Installing LightshowAI from ${LIGHTSHOWAI_DIR}..."
 pip install -e "${LIGHTSHOWAI_DIR}"
 
@@ -61,13 +57,23 @@ cat <<EOF
 ==> Done.
 
 Next steps:
-  1. Edit ${CHATBOT_DIR}/.env and fill in ANTHROPIC_API_KEY, MP_API_KEY, CHAINLIT_PASSWORD.
-  2. Open port 8000 in the EC2 security group (Custom TCP, source: My IP or 0.0.0.0/0).
+  1. Edit ${CHATBOT_DIR}/.env and fill in:
+       ANTHROPIC_API_KEY        (required)
+       MP_API_KEY               (required)
+       CHAINLIT_PASSWORD        (recommended)
+       CLAUDE_MODEL             (optional; default claude-opus-4-7 — set to
+                                claude-sonnet-4-6 if your key lacks 4-7 access)
+
+  2. Open port 8000 in the EC2 security group
+       Type: Custom TCP, Port: 8000, Source: My IP
+
   3. Test interactively:
        cd ${CHATBOT_DIR}
        source ${VENV}/bin/activate
        chainlit run app.py -h --host 0.0.0.0 --port 8000
-  4. Or install as a systemd service:
+
+  4. Or install as a systemd service (after editing the WorkingDirectory /
+     EnvironmentFile / ReadWritePaths to match ${LIGHTSHOWAI_DIR} on this box):
        sudo cp ${CHATBOT_DIR}/lightshowai-chatbot.service /etc/systemd/system/
        sudo systemctl daemon-reload
        sudo systemctl enable --now lightshowai-chatbot

@@ -12,8 +12,19 @@ import numpy as np
 from mcp.server.fastmcp import FastMCP
 
 # --- paths -------------------------------------------------------------------
-_REPO_DIR = Path(__file__).resolve().parent.parent
-_LIGHTSHOWAI_DIR = _REPO_DIR / "examples" / "LightshowAI"
+# This file may live in either of two layouts:
+#   (a) <repo>/mcp/lightshowai_server.py         (broader agentic_workflows repo)
+#   (b) <repo>/examples/LightshowAI/mcp/...      (self-contained LightshowAI example)
+# Detect (b) first by checking for a sibling `lightshowai` package directory.
+_HERE = Path(__file__).resolve().parent
+_VENDORED_LIGHTSHOWAI_DIR = _HERE.parent  # examples/LightshowAI/ in layout (b)
+if (_VENDORED_LIGHTSHOWAI_DIR / "lightshowai").is_dir():
+    _LIGHTSHOWAI_DIR = _VENDORED_LIGHTSHOWAI_DIR
+    _REPO_DIR = _LIGHTSHOWAI_DIR
+else:
+    _REPO_DIR = _HERE.parent
+    _LIGHTSHOWAI_DIR = _REPO_DIR / "examples" / "LightshowAI"
+
 _ENV_FILE = _REPO_DIR / ".env"
 
 # Add LightshowAI package to path

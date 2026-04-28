@@ -30,10 +30,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Paths ------------------------------------------------------------------
-# app.py lives at <repo>/examples/LightshowAI/aws/chatbot/app.py
-REPO_ROOT = Path(__file__).resolve().parents[4]
-MCP_DIR = REPO_ROOT / "mcp"
-LIGHTSHOWAI_DIR = REPO_ROOT / "examples" / "LightshowAI"
+# app.py lives at <LightshowAI>/aws/chatbot/app.py — fully self-contained:
+#   <LightshowAI>/lightshowai/   (the python package)
+#   <LightshowAI>/mcp/           (vendored MCP server scripts)
+#   <LightshowAI>/aws/chatbot/   (this app)
+LIGHTSHOWAI_DIR = Path(__file__).resolve().parents[2]
+MCP_DIR = LIGHTSHOWAI_DIR / "mcp"
 
 MP_API_KEY = os.environ.get("MP_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

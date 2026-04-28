@@ -1,123 +1,130 @@
 # LightshowAI XANES Chatbot — EC2 Deployment
 
-A Chainlit-based web chatbot that gives users an agentic XANES analysis assistant
-in the browser. Uses the Claude Agent SDK to orchestrate two local MCP servers:
+Self-contained Chainlit chatbot. Uses the Claude Agent SDK to orchestrate two
+local MCP servers vendored inside this folder:
 
 - **`materials-project`** — search Materials Project for crystal structures
 - **`lightshowai`** — predict K-edge XANES via OmniXAS (FEFF for Co/Cr/Cu/Fe/Mn/Ni/Ti/V; VASP for Ti and Cu)
 
-Replaces the need to run Claude Code in a terminal for casual users — same agent
-loop, different surface.
+The whole stack lives under `examples/LightshowAI/`. You can copy that one
+directory to a server and run it — no other parts of `agentic_workflows` are
+needed.
 
-## What you get
+## Layout (self-contained)
+
+```
+LightshowAI/
+├── lightshowai/             # the python package (pip install -e .)
+├── model_checkpoints/       # baked OmniXAS .ckpt files (75 MB)
+├── mcp/                     # vendored MCP server scripts
+│   ├── lightshowai_server.py
+│   ├── materials_project_server.py
+│   └── materials_project_client.py
+└── aws/chatbot/             # this folder
+    ├── app.py               # Chainlit handler
+    ├── requirements.txt
+    ├── .env.example
+    ├── setup.sh             # one-shot installer for Ubuntu 22.04
+    ├── lightshowai-chatbot.service
+    └── README.md
+```
+
+## Architecture
 
 ```
 Browser  →  http://<ec2-ip>:8000  →  Chainlit UI
                                        │
                                        │  ClaudeSDKClient (one per session)
                                        ▼
-                                Anthropic API (claude-opus-4-7 by default)
+                              Anthropic API (model from CLAUDE_MODEL env)
                                        │
                           ┌────────────┴────────────┐
                           │                         │
                   materials-project MCP      lightshowai MCP
                   (stdio subprocess)         (stdio subprocess)
                           │                         │
-                  Materials Project API      OmniXAS checkpoints
-                                              (already in this repo)
+                  Materials Project API      Local OmniXAS checkpoints
 ```
-
-## Files
-
-| File | Purpose |
-|---|---|
-| `app.py` | Chainlit handler (auth, session, message loop with streaming + tool steps) |
-| `requirements.txt` | Python deps (chainlit, claude-agent-sdk, mp-api) |
-| `.env.example` | Template for ANTHROPIC_API_KEY, MP_API_KEY, CHAINLIT_PASSWORD |
-| `setup.sh` | One-shot installer for a fresh Ubuntu 22.04 EC2 box |
-| `lightshowai-chatbot.service` | systemd unit for running as a service |
 
 ## Deploy on EC2 (Ubuntu 22.04, t3.large or larger)
 
-Assumes the EC2 instance you already launched. SSH in, then:
+You only need this directory on the box — not the broader `agentic_workflows`
+repo. The simplest way is sparse-checkout:
 
 ```bash
-# 1. Clone the repo
-sudo apt-get update -y && sudo apt-get install -y git
-git clone <YOUR-REPO-URL> ~/agentic_workflows
-cd ~/agentic_workflows/examples/LightshowAI/aws/chatbot
+# On the EC2 box
+cd ~
+git clone --depth 1 --filter=blob:none --no-checkout <YOUR-REPO-URL> tmp_repo
+cd tmp_repo
+git sparse-checkout set examples/LightshowAI
+git checkout
+mv examples/LightshowAI ~/LightshowAI
+cd ~ && rm -rf tmp_repo
+```
 
-# 2. Run the installer (creates ~/venv-chatbot, installs everything)
-./setup.sh
+(If you already have `~/LightshowAI/` from an earlier copy, skip the above.)
 
-# 3. Edit secrets
-nano .env
-# fill in ANTHROPIC_API_KEY, MP_API_KEY, CHAINLIT_PASSWORD
+Then:
 
-# 4. Smoke test interactively
+```bash
+cd ~/LightshowAI/aws/chatbot
+./setup.sh                # creates ~/venv-chatbot, installs everything
+nano .env                 # fill in 3 keys + optional CLAUDE_MODEL
 source ~/venv-chatbot/bin/activate
 chainlit run app.py -h --host 0.0.0.0 --port 8000
-# visit http://<ec2-public-ip>:8000
+```
 
-# 5. (Optional) run as a service
+Visit `http://<ec2-public-ip>:8000`. (Open port 8000 in the SG first — `My IP` source.)
+
+For background operation as a service:
+
+```bash
 sudo cp lightshowai-chatbot.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now lightshowai-chatbot
 sudo journalctl -u lightshowai-chatbot -f
 ```
 
-## Open the security group
+## Configuration (`.env`)
 
-The chatbot listens on port **8000**. In the EC2 console:
-
-- Instance → Security tab → click the SG link → **Edit inbound rules** → **Add rule**
-- Type: `Custom TCP`, Port: `8000`, Source: `My IP` (or `0.0.0.0/0` for public)
-- Save
-
-## URL
-
-```
-http://<ec2-public-ip>:8000
-```
-
-For HTTPS, put Caddy or nginx in front (Caddy auto-provisions Let's Encrypt with one config line). Out of scope for this README.
+| Variable | Required | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | Anthropic API key |
+| `MP_API_KEY` | yes | Materials Project API key (https://next-gen.materialsproject.org/api) |
+| `CHAINLIT_PASSWORD` | recommended | Shared password for collaborators. Blank ⇒ any non-empty username works. |
+| `CLAUDE_MODEL` | optional | Default `claude-opus-4-7`. Set to `claude-sonnet-4-6` if your key lacks 4-7 access (`400 Invalid model name`). |
 
 ## Try it
 
-In the chat:
+After signing in:
 
 > Compare Ti K-edge XANES for the three TiO₂ polymorphs (rutile, anatase, brookite) using FEFF.
 
 > Search Materials Project for stable Cu oxides and predict the Cu K-edge XANES for each.
 
-> Look at experiments/Fe/ in the repo and tell me which Fe oxide had the worst FEFF prediction.
-
-The agent will call the MCP tools, render each tool call as a collapsible "Step", and stream the prose answer in the main bubble.
+The agent will call the MCP tools, render each tool call as a collapsible *Step*, and stream the prose answer in the main bubble.
 
 ## Cost
 
-Roughly:
-
-- **EC2 `t3.large`**: ~$60/mo if always on; ~$2/mo if you stop it when not in use
-- **Anthropic API (claude-opus-4-7)**: $5 / 1M input, $25 / 1M output. A typical XANES analysis turn is ~5K input + 1K output ≈ **$0.05/turn**
-- **Materials Project API**: free
-- **Total**: a couple of dollars a month for light demo use
-
-To cut Anthropic cost ~3×, set `CLAUDE_MODEL=claude-sonnet-4-6` in `.env`. Slightly weaker tool-use quality, much cheaper.
-
-## Known limitations / next steps
-
-- **No HTTPS** — fine for `My IP` SG rule, not for cross-org demos. Add Caddy.
-- **Shared password only** — for per-user accounts, swap to Cognito + Chainlit OAuth (~30 min change).
-- **No persistence** — chat history is per-browser-tab. To persist conversations, enable Chainlit's data layer (Postgres backend; you have RDS available).
-- **No tool-call rate-limiting** — a chatty user can burn API credit fast. Consider per-user budgets in `app.py` if this is exposed publicly.
+- **EC2 `t3.large`**: ~$60/mo always-on; ~$2/mo storage-only when stopped
+- **Anthropic API**: ~$0.05/turn on `claude-opus-4-7`; ~$0.015/turn on `claude-sonnet-4-6`
+- **Materials Project**: free
+- A few dollars/month for light demo use
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| `ANTHROPIC_API_KEY not set` on startup | `.env` not loaded — check the file exists and `EnvironmentFile=` path in the systemd unit |
-| Browser shows blank page | SG doesn't allow port 8000 from your IP |
-| MCP calls return "tool not found" | The MCP server subprocess crashed at startup — check `journalctl -u lightshowai-chatbot` for stderr |
-| LightshowAI predictions hang | First call loads 75 MB of model weights into memory — give it 30–60 s on `t3.medium`. Bump to `t3.large` if it's a recurring problem. |
-| `mp_api` rate-limit errors | The MP free tier is generous but not infinite. If hit during a heavy benchmark session, pause and retry. |
+| `400 Invalid model name passed in model=claude-opus-4-7` | Your key lacks Opus 4.7 access — set `CLAUDE_MODEL=claude-sonnet-4-6` in `.env` and restart |
+| Browser shows nothing at the URL | Port 8000 not allowed in the EC2 security group |
+| `ANTHROPIC_API_KEY not set` on startup | `.env` not loaded — check the file exists and the systemd `EnvironmentFile=` path |
+| MCP "tool not found" | The MCP subprocess crashed — `journalctl -u lightshowai-chatbot` for stderr |
+| First inference call hangs 30–60 s | Loading 75 MB of OmniXAS weights into memory. One-time per process. |
+| Chainlit login screen but rejects the password | The value of `CHAINLIT_PASSWORD` in `.env` is what you typed (any email is fine; only the password is checked) |
+
+## Known limitations
+
+- **No HTTPS** — fine for `My IP` SG rule, not public demos. Add Caddy in front.
+- **Shared password only** — for per-user accounts, swap to Chainlit OAuth + Cognito.
+- **No persistence** — chat history is per browser tab. Enable Chainlit's data layer for cross-session storage.
+- **No per-user rate limiting** — a chatty user can burn API credit fast.
