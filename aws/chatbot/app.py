@@ -409,6 +409,12 @@ def _mlflow_finish_turn(
             pass
 
 
+def _is_sigterm_exit(exc: Exception) -> bool:
+    """Claude CLI reports systemd/service shutdown as command exit 143."""
+    message = str(exc)
+    return "exit code 143" in message or "exit code: 143" in message
+
+
 # --- Message handler --------------------------------------------------------
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
@@ -427,12 +433,12 @@ async def on_message(message: cl.Message) -> None:
     assistant_text: list[str] = []
     cl.user_session.set("rendered_html_paths", set())
 
-    await client.query(message.content)
-
     reply = cl.Message(content="")
     await reply.send()
 
     try:
+        await client.query(message.content)
+
         async for msg in client.receive_response():
             if not isinstance(msg, AssistantMessage):
                 continue
@@ -462,6 +468,14 @@ async def on_message(message: cl.Message) -> None:
 
         await reply.update()
         artifacts.extend(await _render_html_files("".join(assistant_text)))
+    except Exception as exc:
+        if _is_sigterm_exit(exc):
+            sys.stderr.write(
+                "[chatbot] Claude CLI exited with 143/SIGTERM during service shutdown; "
+                "suppressing traceback.\n"
+            )
+            return
+        raise
     finally:
         _mlflow_finish_turn(
             run,
