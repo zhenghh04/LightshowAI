@@ -189,6 +189,12 @@ File output convention (REQUIRED — the chat UI auto-renders files in ~/tmp/):
   • Use ~/tmp/ for everything. Do not write to ~/Downloads/ — it doesn't exist.
   • Pass open_browser=False (the user views via the chat, not a local browser).
 
+Slash commands available (located in .claude/commands/ within this bundle):
+  • /xanes-analysis — full Ti/Fe/V/etc K-edge benchmarking workflow vs experimental
+    .dat standards with shift-optimized Pearson/Spearman/Cos(∂) ranking.
+    Invoke when the user says things like "benchmark TiO2 against my experimental
+    data" or "rank Fe oxide candidates against this XAS spectrum".
+
 If the user asks for something outside XANES / Materials Project, say so plainly
 and ask whether they want you to proceed anyway.
 """
@@ -337,6 +343,10 @@ async def on_chat_start() -> None:
         mcp_servers=MCP_SERVERS,
         permission_mode="bypassPermissions",
         max_turns=30,
+        # cwd points the bundled Claude Code CLI at the LightshowAI bundle
+        # root, so it discovers .claude/commands/*.md (e.g. /xanes-analysis)
+        # and any future .claude/skills/ from the same directory.
+        cwd=str(LIGHTSHOWAI_DIR),
     )
     client = ClaudeSDKClient(options=options)
     await client.__aenter__()
