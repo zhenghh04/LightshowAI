@@ -184,6 +184,10 @@ def plot_xanes(
         out_dir = Path.home() / "tmp"
         out_dir.mkdir(exist_ok=True)
         output_path = str(out_dir / f"{material_id}_{absorbing_element}_{spectroscopy_type}_xanes.html")
+    else:
+        # Expand ~ and resolve so callers can pass "~/tmp/foo.html" directly.
+        output_path = str(Path(os.path.expanduser(output_path)).resolve())
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     fig.write_html(output_path)
 
@@ -253,6 +257,9 @@ def compare_xanes(
         out_dir.mkdir(exist_ok=True)
         label = "_".join(ids)[:60]
         output_path = str(out_dir / f"compare_{absorbing_element}_{label}_xanes.html")
+    else:
+        output_path = str(Path(os.path.expanduser(output_path)).resolve())
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     fig.write_html(output_path)
 

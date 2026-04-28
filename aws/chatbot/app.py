@@ -188,37 +188,37 @@ def _extract_html_files(text: str) -> list[Path]:
 
 
 async def _send_iframe(path: Path) -> None:
-    """Render one HTML file inline.
+    """Render one HTML file inline, with multiple fallbacks.
 
-    Uses raw <iframe> markup (works because unsafe_allow_html=true in
-    .chainlit/config.toml) PLUS a cl.File attachment as a clickable
-    fallback in case the browser blocks the iframe.
+    Chainlit's markdown renderer strips raw <iframe> tags in some versions even
+    with unsafe_allow_html=true. To guarantee the user sees the visualization
+    one way or another, send THREE things in one message:
 
-    The iframe src is an absolute URL pointing at the SEPARATE static-file
-    server (lightshowai-plots.service on port 8001), not Chainlit. This
-    sidesteps Chainlit's lifespan replacing in-process route mounts.
+      1. A clickable markdown link to open the file in a new tab — always works
+      2. A cl.CustomElement('iframe', src=...) — renders inline if
+         public/elements/iframe.jsx is on the box and Chainlit picks it up
+      3. A cl.File(display='inline') attachment — Chainlit's built-in file viewer
+
+    The src is an absolute URL pointing at the SEPARATE static-file server
+    (lightshowai-plots.service on port 8001), not Chainlit.
     """
     url = f"{PLOTS_PUBLIC_URL}/{path.name}"
-    iframe_html = (
-        f'<iframe src="{url}" '
-        f'style="width:100%; height:520px; border:1px solid #243240; '
-        f'border-radius:8px; background:#fff;" '
-        f'sandbox="allow-scripts allow-same-origin allow-popups" '
-        f'loading="lazy" title="{path.name}"></iframe>'
-    )
+    elements = [
+        cl.CustomElement(
+            name="iframe",
+            props={"src": url, "height": 520, "title": path.name},
+        ),
+        cl.File(name=path.name, path=str(path), display="inline"),
+    ]
     await cl.Message(
-        content=f"**{path.name}**\n\n{iframe_html}",
-        elements=[cl.File(name=path.name, path=str(path), display="side")],
+        content=f"**{path.name}** — [open in new tab]({url})",
+        elements=elements,
     ).send()
 
 
 # --- Session lifecycle ------------------------------------------------------
 @cl.on_chat_start
 async def on_chat_start() -> None:
-    # Belt-and-braces: also try the mount here, in case on_app_startup didn't
-    # fire (older Chainlit). Idempotent.
-    _mount_plots_dir_once()
-
     options = ClaudeAgentOptions(
         system_prompt=SYSTEM_PROMPT,
         model=MODEL,

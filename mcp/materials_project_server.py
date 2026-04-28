@@ -369,7 +369,7 @@ def _visualize_structure_sync(
     except Exception as exc:
         return f"Failed to build figure: {exc}"
 
-    out = Path(output_path)
+    out = Path(os.path.expanduser(output_path)).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(str(out), include_plotlyjs="cdn")
     return str(out)
