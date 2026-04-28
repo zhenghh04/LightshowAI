@@ -15,14 +15,16 @@ Run on EC2 via systemd: see lightshowai-chatbot.service.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
+import time
+import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 import chainlit as cl
-import plotly.io as pio
+import mlflow
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -79,6 +81,44 @@ if not (os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_
     )
     sys.exit(1)
 
+# --- MLflow auto-logging ----------------------------------------------------
+# Each chat turn = one MLflow run. Logs:
+#   params : model, prompt (truncated), user, tool list
+#   metrics: latency, tool_calls, response_chars
+#   tags   : session id
+#   artifacts: every HTML plot the tools produced
+#
+# Auth: AmSC MLflow uses bearer-token auth; the token comes from AM_SC_API_KEY
+# (same one used for the i2 gateway and the mlflow-amsc MCP). MLflow client
+# reads it from MLFLOW_TRACKING_TOKEN, so we mirror it.
+AM_SC_API_KEY = os.environ.get("AM_SC_API_KEY", "")
+MLFLOW_TRACKING_URI = os.environ.get(
+    "MLFLOW_TRACKING_URI", "https://mlflow.american-science-cloud.org"
+)
+MLFLOW_EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT", "LightshowAI-XANES-chatbot")
+MLFLOW_INSECURE_TLS = os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "true")
+
+if AM_SC_API_KEY:
+    os.environ.setdefault("MLFLOW_TRACKING_TOKEN", AM_SC_API_KEY)
+os.environ.setdefault("MLFLOW_TRACKING_INSECURE_TLS", MLFLOW_INSECURE_TLS)
+
+MLFLOW_ENABLED = bool(AM_SC_API_KEY and MLFLOW_TRACKING_URI)
+if MLFLOW_ENABLED:
+    try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(MLFLOW_EXPERIMENT)
+        sys.stderr.write(
+            f"[chatbot] MLflow logging to {MLFLOW_TRACKING_URI} "
+            f"experiment='{MLFLOW_EXPERIMENT}'\n"
+        )
+    except Exception as exc:
+        sys.stderr.write(f"[chatbot] MLflow init failed (logging disabled): {exc}\n")
+        MLFLOW_ENABLED = False
+else:
+    sys.stderr.write(
+        "[chatbot] MLflow logging disabled (set AM_SC_API_KEY + MLFLOW_TRACKING_URI to enable)\n"
+    )
+
 # --- System prompt ----------------------------------------------------------
 SYSTEM_PROMPT = """\
 You are an XANES analysis assistant for the AmSC LightshowAI workflow.
@@ -115,16 +155,8 @@ and ask whether they want you to proceed anyway.
 
 # --- MCP server config ------------------------------------------------------
 PYTHON = sys.executable
-
-# AmSC MLflow tracking via the user's own MCP server (vendored from
-# Documents/Research/AmSC/mlflow/intro-to-mlflow-pytorch/mcp_server/server.py).
-# Auth env name on that server is AM_SC_API_KEY; tracking URI defaults to
-# https://mlflow.american-science-cloud.org. Both can be overridden in .env.
-AM_SC_API_KEY = os.environ.get("AM_SC_API_KEY", "")
-MLFLOW_TRACKING_URI = os.environ.get(
-    "MLFLOW_TRACKING_URI", "https://mlflow.american-science-cloud.org"
-)
-MLFLOW_TRACKING_INSECURE_TLS = os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "true")
+# AM_SC_API_KEY, MLFLOW_TRACKING_URI, MLFLOW_INSECURE_TLS are read above
+# in the MLflow init block — reused here to wire the mlflow-amsc MCP server.
 
 MCP_SERVERS = {
     "materials-project": {
@@ -149,7 +181,7 @@ MCP_SERVERS = {
         "env": {
             "AM_SC_API_KEY": AM_SC_API_KEY,
             "MLFLOW_TRACKING_URI": MLFLOW_TRACKING_URI,
-            "MLFLOW_TRACKING_INSECURE_TLS": MLFLOW_TRACKING_INSECURE_TLS,
+            "MLFLOW_TRACKING_INSECURE_TLS": MLFLOW_INSECURE_TLS,
         },
     },
 }
@@ -167,7 +199,7 @@ def auth(username: str, password: str) -> cl.User | None:
 
 # --- Inline HTML rendering --------------------------------------------------
 # Match absolute or ~-prefixed paths ending in .html (the tools return both forms).
-_HTML_PATH_RE = re.compile(r"(?:/|~)[\w./~-]+\.html\b")
+_HTML_PATH_RE = re.compile(r"(?:/|~)[^\s<>'\"]+?\.html\b")
 
 
 def _extract_html_files(text: str) -> list[Path]:
@@ -189,57 +221,72 @@ def _extract_html_files(text: str) -> list[Path]:
     return out
 
 
-_PLOTLY_FIG_RE = re.compile(
-    r'Plotly\.newPlot\(\s*"[^"]+",\s*(\[.*?\])\s*,\s*({.*?})\s*[,)]',
-    re.DOTALL,
-)
+def _html_url(path: Path) -> str:
+    """Return the browser-visible URL for a saved HTML artifact."""
+    return f"{PLOTS_PUBLIC_URL}/{quote(path.name)}"
 
 
-def _extract_plotly_figure(path: Path) -> dict | None:
-    """Pull the Plotly figure (data + layout) out of a saved Plotly HTML file.
-
-    Plotly's HTML embeds the figure as `Plotly.newPlot("div", DATA, LAYOUT, ...)`
-    in a <script> tag. We regex it out and return a {data, layout} dict that
-    cl.Plotly accepts directly.
-    """
-    try:
-        html = path.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
-        return None
-    m = _PLOTLY_FIG_RE.search(html)
-    if not m:
-        return None
-    try:
-        data = json.loads(m.group(1))
-        layout = json.loads(m.group(2))
-    except json.JSONDecodeError:
-        return None
-    return {"data": data, "layout": layout}
+def _html_label(path: Path) -> str:
+    """Return a compact label for a saved plot/viewer artifact."""
+    return "Crystal structure" if "structure" in path.name else "XANES spectrum"
 
 
-async def _send_iframe(path: Path) -> None:
-    """Send the saved HTML file as both a clickable link AND a download.
+def _iframe_height(path: Path) -> int:
+    """Structure viewers need more vertical room than spectrum plots."""
+    return 680 if "structure" in path.name else 540
 
-    Embedding (iframe / CustomElement / cl.Plotly / cl.Image) all proved
-    unreliable in this Chainlit version. The two-prong link+download approach
-    is the most robust path:
 
-      • Markdown link → opens fully-interactive Plotly plot in a new tab
-        via the static-file server (lightshowai-plots.service on :8001)
-      • cl.File attachment → renders a download card so the user can save
-        the .html locally for sharing
-    """
-    url = f"{PLOTS_PUBLIC_URL}/{path.name}"
+async def _send_inline_html(path: Path) -> None:
+    """Render a saved HTML file inline and keep link/download fallbacks."""
+    url = _html_url(path)
     size_kb = path.stat().st_size // 1024 if path.exists() else 0
-    label = "🔬 Crystal structure" if "structure" in path.name else "📈 XANES spectrum"
+    label = _html_label(path)
+    elements = []
+    custom_element = getattr(cl, "CustomElement", None)
+    if custom_element is not None:
+        elements.append(
+            custom_element(
+                name="iframe",
+                display="inline",
+                props={
+                    "src": url,
+                    "height": _iframe_height(path),
+                    "title": f"{label}: {path.name}",
+                },
+            )
+        )
+    else:
+        sys.stderr.write(
+            "[chatbot] cl.CustomElement unavailable; sending HTML as link/download only\n"
+        )
+    elements.append(cl.File(name=path.name, path=str(path), display="inline"))
+
     await cl.Message(
         content=(
-            f"### {label} — [{path.name}]({url})\n\n"
-            f"Click the link above to open the interactive plot in a new tab, "
-            f"or download the file below ({size_kb} KB)."
+            f"### {label}: [{path.name}]({url})\n\n"
+            f"Interactive HTML is rendered below. Open the link for a full-page "
+            f"view, or download the attached file ({size_kb} KB)."
         ),
-        elements=[cl.File(name=path.name, path=str(path), display="inline")],
+        elements=elements,
     ).send()
+
+
+async def _render_html_files(text: str) -> list[Path]:
+    """Inline-render each newly mentioned HTML artifact exactly once."""
+    rendered = cl.user_session.get("rendered_html_paths")
+    if rendered is None:
+        rendered = set()
+        cl.user_session.set("rendered_html_paths", rendered)
+
+    artifacts: list[Path] = []
+    for html in _extract_html_files(text):
+        artifacts.append(html)
+        key = str(html)
+        if key in rendered:
+            continue
+        rendered.add(key)
+        await _send_inline_html(html)
+    return artifacts
 
 
 # --- Session lifecycle ------------------------------------------------------
@@ -256,6 +303,7 @@ async def on_chat_start() -> None:
     await client.__aenter__()
     cl.user_session.set("client", client)
     cl.user_session.set("steps", {})  # tool_use_id -> cl.Step
+    cl.user_session.set("rendered_html_paths", set())
 
     await cl.Message(
         content=(
@@ -273,41 +321,113 @@ async def on_chat_end() -> None:
         await client.__aexit__(None, None, None)
 
 
+# --- MLflow run helpers -----------------------------------------------------
+def _mlflow_start_turn(prompt: str, user: str, session_id: str):
+    """Start an MLflow run for one chat turn. Returns the run object or None."""
+    if not MLFLOW_ENABLED:
+        return None
+    try:
+        run = mlflow.start_run(
+            run_name=f"{(prompt[:40] or 'turn').strip()}-{uuid.uuid4().hex[:6]}",
+        )
+        mlflow.log_param("model", MODEL)
+        mlflow.log_param("prompt", prompt[:500])
+        mlflow.log_param("user", user)
+        mlflow.set_tag("session_id", session_id)
+        mlflow.set_tag("source", "lightshowai-chatbot")
+        return run
+    except Exception as exc:
+        sys.stderr.write(f"[chatbot] mlflow.start_run failed: {exc}\n")
+        return None
+
+
+def _mlflow_finish_turn(
+    run, *, latency_s: float, tool_calls: int, tool_names: list[str],
+    response_text: str, artifacts: list[Path],
+) -> None:
+    """Log metrics, response, and artifact files; end the run. Errors are logged but not raised."""
+    if run is None:
+        return
+    try:
+        mlflow.log_metric("latency_seconds", round(latency_s, 3))
+        mlflow.log_metric("tool_calls", tool_calls)
+        mlflow.log_metric("response_chars", len(response_text or ""))
+        if tool_names:
+            mlflow.log_param("tools_used", ",".join(tool_names)[:500])
+        if response_text:
+            mlflow.log_text(response_text, "response.md")
+        for art in artifacts:
+            try:
+                mlflow.log_artifact(str(art), artifact_path="plots")
+            except Exception as exc:
+                sys.stderr.write(f"[chatbot] log_artifact({art.name}) failed: {exc}\n")
+    except Exception as exc:
+        sys.stderr.write(f"[chatbot] mlflow log failed: {exc}\n")
+    finally:
+        try:
+            mlflow.end_run()
+        except Exception:
+            pass
+
+
 # --- Message handler --------------------------------------------------------
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
     client: ClaudeSDKClient = cl.user_session.get("client")
     steps: dict[str, cl.Step] = cl.user_session.get("steps")
 
+    user = cl.user_session.get("user")
+    user_id = getattr(user, "identifier", "anon") if user else "anon"
+    session_id = cl.user_session.get("id") or "unknown"
+
+    run = _mlflow_start_turn(message.content, user_id, session_id)
+    t0 = time.monotonic()
+    tool_calls = 0
+    tool_names: list[str] = []
+    artifacts: list[Path] = []
+    assistant_text: list[str] = []
+
     await client.query(message.content)
 
     reply = cl.Message(content="")
     await reply.send()
 
-    async for msg in client.receive_response():
-        if not isinstance(msg, AssistantMessage):
-            continue
-        for block in msg.content:
-            if isinstance(block, TextBlock):
-                await reply.stream_token(block.text)
+    try:
+        async for msg in client.receive_response():
+            if not isinstance(msg, AssistantMessage):
+                continue
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    assistant_text.append(block.text)
+                    await reply.stream_token(block.text)
 
-            elif isinstance(block, ToolUseBlock):
-                step = cl.Step(name=block.name, type="tool")
-                step.input = block.input
-                steps[block.id] = step
-                await step.send()
+                elif isinstance(block, ToolUseBlock):
+                    step = cl.Step(name=block.name, type="tool")
+                    step.input = block.input
+                    steps[block.id] = step
+                    await step.send()
+                    tool_calls += 1
+                    tool_names.append(block.name)
 
-            elif isinstance(block, ToolResultBlock):
-                step = steps.pop(block.tool_use_id, None)
-                if step is None:
-                    continue
-                step.output = block.content
-                if getattr(block, "is_error", False):
-                    step.is_error = True
-                await step.update()
+                elif isinstance(block, ToolResultBlock):
+                    step = steps.pop(block.tool_use_id, None)
+                    if step is None:
+                        continue
+                    step.output = block.content
+                    if getattr(block, "is_error", False):
+                        step.is_error = True
+                    await step.update()
 
-                # Inline-embed any HTML files the tool produced.
-                for html in _extract_html_files(str(block.content)):
-                    await _send_iframe(html)
+                    artifacts.extend(await _render_html_files(str(block.content)))
 
-    await reply.update()
+        await reply.update()
+        artifacts.extend(await _render_html_files("".join(assistant_text)))
+    finally:
+        _mlflow_finish_turn(
+            run,
+            latency_s=time.monotonic() - t0,
+            tool_calls=tool_calls,
+            tool_names=tool_names,
+            response_text="".join(assistant_text),
+            artifacts=artifacts,
+        )
