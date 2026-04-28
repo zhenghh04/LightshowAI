@@ -21,7 +21,6 @@ import sys
 from pathlib import Path
 
 import chainlit as cl
-from chainlit.server import app as fastapi_app
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -43,11 +42,33 @@ load_dotenv()
 LIGHTSHOWAI_DIR = Path(__file__).resolve().parents[2]
 MCP_DIR = LIGHTSHOWAI_DIR / "mcp"
 
-# Plotly HTML files (XANES plots + crystal structures) land here. Mounted
-# at /plots so iframes can render them inline.
+# Plotly HTML files (XANES plots + crystal structures) land here. Served
+# at /plots/ so iframes embedded in chat messages can pull them inline.
+# Mounted from the Chainlit startup hook so the route attaches AFTER
+# Chainlit's FastAPI app is fully built (a module-level mount silently gets
+# replaced when Chainlit rebuilds its app during startup).
 PLOT_DIR = Path.home() / "tmp"
 PLOT_DIR.mkdir(parents=True, exist_ok=True)
-fastapi_app.mount("/plots", StaticFiles(directory=str(PLOT_DIR)), name="plots")
+
+
+def _mount_plots_dir_once() -> None:
+    """Attach /plots/ -> ~/tmp/ on the live FastAPI app, idempotently."""
+    from chainlit.server import app as fastapi_app
+    if not any(getattr(r, "name", None) == "plots" for r in fastapi_app.routes):
+        fastapi_app.mount(
+            "/plots",
+            StaticFiles(directory=str(PLOT_DIR)),
+            name="plots",
+        )
+        sys.stderr.write(f"[chatbot] mounted /plots -> {PLOT_DIR}\n")
+
+
+# Newer Chainlit (>=1.x) exposes on_app_startup; fall through to first-message
+# mount if the decorator isn't available.
+if hasattr(cl, "on_app_startup"):
+    @cl.on_app_startup
+    async def _startup_mount_plots() -> None:
+        _mount_plots_dir_once()
 
 MP_API_KEY = os.environ.get("MP_API_KEY", "")
 SHARED_PASSWORD = os.environ.get("CHAINLIT_PASSWORD", "")
@@ -159,22 +180,33 @@ def _extract_html_files(text: str) -> list[Path]:
 
 
 async def _send_iframe(path: Path) -> None:
-    """Render one HTML file as an inline iframe in the chat."""
+    """Render one HTML file inline.
+
+    Uses raw <iframe> markup (works because unsafe_allow_html=true in
+    .chainlit/config.toml) PLUS a cl.File attachment as a clickable
+    fallback in case the browser blocks the iframe.
+    """
     url = f"/plots/{path.name}"
+    iframe_html = (
+        f'<iframe src="{url}" '
+        f'style="width:100%; height:520px; border:1px solid #243240; '
+        f'border-radius:8px; background:#fff;" '
+        f'sandbox="allow-scripts allow-same-origin allow-popups" '
+        f'loading="lazy" title="{path.name}"></iframe>'
+    )
     await cl.Message(
-        content=f"**{path.name}**",
-        elements=[
-            cl.CustomElement(
-                name="iframe",
-                props={"src": url, "height": 520, "title": path.name},
-            )
-        ],
+        content=f"**{path.name}**\n\n{iframe_html}",
+        elements=[cl.File(name=path.name, path=str(path), display="side")],
     ).send()
 
 
 # --- Session lifecycle ------------------------------------------------------
 @cl.on_chat_start
 async def on_chat_start() -> None:
+    # Belt-and-braces: also try the mount here, in case on_app_startup didn't
+    # fire (older Chainlit). Idempotent.
+    _mount_plots_dir_once()
+
     options = ClaudeAgentOptions(
         system_prompt=SYSTEM_PROMPT,
         model=MODEL,
