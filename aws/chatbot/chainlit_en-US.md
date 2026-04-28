@@ -27,3 +27,8 @@ Powered by:
 
 LightshowAI: Carbone, Lu, Kelly, Sri Vatsavai, Qu, Cao, Jiang (BNL).
 References: [Phys. Rev. Mater. 8, 013801 (2024)], [JOSS 8(87), 5182 (2023)], [Phys. Rev. Mater. 9, 043803 (2025)].
+
+---
+
+Agentic workflows empowered by **AmSC AI Services** and **AmSC Model Services**.
+For questions, please contact Huihuo Zheng at [huihuo.zheng@anl.gov](mailto:huihuo.zheng@anl.gov).
