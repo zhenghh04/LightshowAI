@@ -4,6 +4,9 @@ Wires the Claude Agent SDK to two local MCP stdio servers:
   - materials-project — Materials Project lookup tools
   - lightshowai     — OmniXAS XANES prediction tools
 
+Inline-renders any HTML files written by the tools (XANES plots, 3D structure
+viewers) by mounting ~/tmp/ at /plots and emitting an iframe custom element.
+
 Run locally:
     chainlit run app.py -h --port 8000
 
@@ -13,10 +16,12 @@ Run on EC2 via systemd: see lightshowai-chatbot.service.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
 import chainlit as cl
+from chainlit.server import app as fastapi_app
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -26,6 +31,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
@@ -37,13 +43,29 @@ load_dotenv()
 LIGHTSHOWAI_DIR = Path(__file__).resolve().parents[2]
 MCP_DIR = LIGHTSHOWAI_DIR / "mcp"
 
-MP_API_KEY = os.environ.get("MP_API_KEY", "")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-SHARED_PASSWORD = os.environ.get("CHAINLIT_PASSWORD", "")
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-7")
+# Plotly HTML files (XANES plots + crystal structures) land here. Mounted
+# at /plots so iframes can render them inline.
+PLOT_DIR = Path.home() / "tmp"
+PLOT_DIR.mkdir(parents=True, exist_ok=True)
+fastapi_app.mount("/plots", StaticFiles(directory=str(PLOT_DIR)), name="plots")
 
-if not ANTHROPIC_API_KEY:
-    sys.stderr.write("ERROR: ANTHROPIC_API_KEY not set in environment.\n")
+MP_API_KEY = os.environ.get("MP_API_KEY", "")
+SHARED_PASSWORD = os.environ.get("CHAINLIT_PASSWORD", "")
+
+# Model: prefer the AmSC i2 convention (ANTHROPIC_MODEL), then legacy CLAUDE_MODEL,
+# then a sensible default for the i2 gateway.
+MODEL = (
+    os.environ.get("ANTHROPIC_MODEL")
+    or os.environ.get("CLAUDE_MODEL")
+    or "claude-sonnet-4-6"
+)
+
+# Auth: ANTHROPIC_AUTH_TOKEN (Bearer; for proxies like i2 LiteLLM) or
+# ANTHROPIC_API_KEY (direct Anthropic). At least one must be set.
+if not (os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")):
+    sys.stderr.write(
+        "ERROR: neither ANTHROPIC_AUTH_TOKEN nor ANTHROPIC_API_KEY is set.\n"
+    )
     sys.exit(1)
 
 # --- System prompt ----------------------------------------------------------
@@ -68,12 +90,19 @@ Workflow guidance:
   5. Be concise. Show the call you made, the key numbers, and a one-paragraph
      interpretation. No long preambles.
 
+File output convention (REQUIRED — the chat UI auto-renders files in ~/tmp/):
+  • Always pass output_path explicitly when calling tools that save HTML:
+      - lightshowai.plot_xanes        → output_path="~/tmp/<material_id>_xanes.html"
+      - lightshowai.compare_xanes     → output_path="~/tmp/compare_<element>.html"
+      - mp_visualize_structure        → output_path="~/tmp/<material_id>_structure.html"
+  • Use ~/tmp/ for everything. Do not write to ~/Downloads/ — it doesn't exist.
+  • Pass open_browser=False (the user views via the chat, not a local browser).
+
 If the user asks for something outside XANES / Materials Project, say so plainly
 and ask whether they want you to proceed anyway.
 """
 
 # --- MCP server config ------------------------------------------------------
-# Both servers run as stdio subprocesses. They inherit the venv's Python.
 PYTHON = sys.executable
 
 MCP_SERVERS = {
@@ -89,35 +118,68 @@ MCP_SERVERS = {
         "args": [str(MCP_DIR / "lightshowai_server.py")],
         "env": {
             "MP_API_KEY": MP_API_KEY,
-            # lightshowai_server.py adds examples/LightshowAI to sys.path; we
-            # also need the package's site-packages, which the venv provides.
             "PYTHONPATH": str(LIGHTSHOWAI_DIR),
         },
     },
 }
 
 
-# --- Auth (shared password) -------------------------------------------------
+# --- Auth -------------------------------------------------------------------
 @cl.password_auth_callback
 def auth(username: str, password: str) -> cl.User | None:
-    """One shared password for all collaborators. Set CHAINLIT_PASSWORD in .env."""
     if not SHARED_PASSWORD:
-        # Auth disabled: any non-empty password lets you in. Fine for solo dev.
         return cl.User(identifier=username or "anonymous") if username else None
     if password == SHARED_PASSWORD:
         return cl.User(identifier=username or "user")
     return None
 
 
+# --- Inline HTML rendering --------------------------------------------------
+# Match absolute or ~-prefixed paths ending in .html (the tools return both forms).
+_HTML_PATH_RE = re.compile(r"(?:/|~)[\w./~-]+\.html\b")
+
+
+def _extract_html_files(text: str) -> list[Path]:
+    """Pull every .html file path from a tool result that lives under PLOT_DIR."""
+    out: list[Path] = []
+    seen: set[str] = set()
+    for raw in _HTML_PATH_RE.findall(text):
+        p = Path(raw).expanduser().resolve()
+        if not p.is_file():
+            continue
+        try:
+            p.relative_to(PLOT_DIR.resolve())
+        except ValueError:
+            continue  # outside the served directory — skip for safety
+        if str(p) in seen:
+            continue
+        seen.add(str(p))
+        out.append(p)
+    return out
+
+
+async def _send_iframe(path: Path) -> None:
+    """Render one HTML file as an inline iframe in the chat."""
+    url = f"/plots/{path.name}"
+    await cl.Message(
+        content=f"**{path.name}**",
+        elements=[
+            cl.CustomElement(
+                name="iframe",
+                props={"src": url, "height": 520, "title": path.name},
+            )
+        ],
+    ).send()
+
+
 # --- Session lifecycle ------------------------------------------------------
 @cl.on_chat_start
 async def on_chat_start() -> None:
-    """Spin up a per-session ClaudeSDKClient with both MCP servers attached."""
     options = ClaudeAgentOptions(
         system_prompt=SYSTEM_PROMPT,
         model=MODEL,
         mcp_servers=MCP_SERVERS,
-        permission_mode="acceptEdits",  # auto-approve filesystem writes (plots, etc.)
+        permission_mode="bypassPermissions",
         max_turns=30,
     )
     client = ClaudeSDKClient(options=options)
@@ -128,8 +190,8 @@ async def on_chat_start() -> None:
     await cl.Message(
         content=(
             f"**LightshowAI XANES chatbot** — model `{MODEL}`\n\n"
-            "Try: *Compare Ti K-edge XANES for the three TiO₂ polymorphs (rutile, "
-            "anatase, brookite) using FEFF.*"
+            "Try: *Show the structure of mp-2657 and predict its Ti K-edge XANES "
+            "with FEFF.*"
         )
     ).send()
 
@@ -149,7 +211,6 @@ async def on_message(message: cl.Message) -> None:
 
     await client.query(message.content)
 
-    # One streaming reply bubble for the assistant's text output.
     reply = cl.Message(content="")
     await reply.send()
 
@@ -157,18 +218,15 @@ async def on_message(message: cl.Message) -> None:
         if not isinstance(msg, AssistantMessage):
             continue
         for block in msg.content:
-            # Text → stream into the visible reply.
             if isinstance(block, TextBlock):
                 await reply.stream_token(block.text)
 
-            # Tool use → render as a collapsible Step with the input args.
             elif isinstance(block, ToolUseBlock):
                 step = cl.Step(name=block.name, type="tool")
                 step.input = block.input
                 steps[block.id] = step
                 await step.send()
 
-            # Tool result → close the matching Step.
             elif isinstance(block, ToolResultBlock):
                 step = steps.pop(block.tool_use_id, None)
                 if step is None:
@@ -177,5 +235,9 @@ async def on_message(message: cl.Message) -> None:
                 if getattr(block, "is_error", False):
                     step.is_error = True
                 await step.update()
+
+                # Inline-embed any HTML files the tool produced.
+                for html in _extract_html_files(str(block.content)):
+                    await _send_iframe(html)
 
     await reply.update()
