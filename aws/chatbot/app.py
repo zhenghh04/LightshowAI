@@ -218,41 +218,27 @@ def _extract_plotly_figure(path: Path) -> dict | None:
 
 
 async def _send_iframe(path: Path) -> None:
-    """Render one Plotly HTML file as an inline cl.Plotly element.
+    """Send the saved HTML file as both a clickable link AND a download.
 
-    Why not iframes: Chainlit's markdown renderer strips <iframe> in some
-    versions and CustomElements need a frontend rebuild on others. cl.Plotly
-    is a first-class element — Chainlit always renders it natively as a
-    real Plotly canvas.
+    Embedding (iframe / CustomElement / cl.Plotly / cl.Image) all proved
+    unreliable in this Chainlit version. The two-prong link+download approach
+    is the most robust path:
 
-    Falls back to a clickable link to the static server (port 8001) if the
-    figure can't be extracted (non-Plotly HTML, malformed file, etc.).
+      • Markdown link → opens fully-interactive Plotly plot in a new tab
+        via the static-file server (lightshowai-plots.service on :8001)
+      • cl.File attachment → renders a download card so the user can save
+        the .html locally for sharing
     """
-    fig = _extract_plotly_figure(path)
     url = f"{PLOTS_PUBLIC_URL}/{path.name}"
-
-    if fig is None:
-        # Non-Plotly HTML or extraction failed — fall back to a link.
-        await cl.Message(
-            content=f"**{path.name}** — [open in new tab]({url}) (could not embed)",
-        ).send()
-        return
-
-    # Build a real plotly Figure; cl.Plotly accepts both Figure and dict, but
-    # going through pio.from_json() validates the structure and catches errors
-    # before they hit the React renderer.
-    try:
-        figure = pio.from_json(json.dumps(fig))
-    except Exception as e:
-        sys.stderr.write(f"[chatbot] plotly parse failed for {path.name}: {e}\n")
-        await cl.Message(
-            content=f"**{path.name}** — [open in new tab]({url}) (parse error)",
-        ).send()
-        return
-
+    size_kb = path.stat().st_size // 1024 if path.exists() else 0
+    label = "🔬 Crystal structure" if "structure" in path.name else "📈 XANES spectrum"
     await cl.Message(
-        content=f"**{path.name}** — [open in new tab]({url})",
-        elements=[cl.Plotly(name=path.stem, figure=figure, display="inline")],
+        content=(
+            f"### {label} — [{path.name}]({url})\n\n"
+            f"Click the link above to open the interactive plot in a new tab, "
+            f"or download the file below ({size_kb} KB)."
+        ),
+        elements=[cl.File(name=path.name, path=str(path), display="inline")],
     ).send()
 
 

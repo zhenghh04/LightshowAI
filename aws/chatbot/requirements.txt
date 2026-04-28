@@ -14,5 +14,8 @@ emmet-core==0.84.3rc0
 mlflow>=2.16
 urllib3>=2.0
 
+# Inline PNG rendering of Plotly figures (used by _send_iframe in app.py)
+kaleido>=0.2.1
+
 # lightshowai MCP server pulls in the LightshowAI package itself,
 # which is installed separately via setup.sh from the local repo (editable install).
