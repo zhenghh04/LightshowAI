@@ -19,8 +19,8 @@ The user may specify any of:
 - **Model** — `VASP` or `FEFF` (default: `VASP` if available for the element, else `FEFF`)
 - **Hull threshold** — max eV/atom above convex hull (default: `0.05`)
 - **Experimental data directory** — folder containing `*.dat` files (default: current working directory or `experiments/`)
-- **Output directory** — where to save HTML figure and PNG (default: same as experimental data directory)
-- **Max structures** — max number of Materials Project results to include (default: `10`)
+- **Output directory** — where to save HTML figure and PNG (default: `~/tmp/xanes_analysis`)
+- **Max structures** — max number of Materials Project results to include (default: `5`; do not exceed `10` unless the user explicitly asks)
 
 ## Step 0: Check available models
 
@@ -30,6 +30,7 @@ Call `list_available_models` to confirm which (element, model) combinations are 
 
 Use `mp_search_materials` with:
 - `formula` = user formula
+- `is_stable` = True for the first pass
 - `energy_above_hull_max` = hull threshold
 - `fields` = `"material_id,formula_pretty,energy_above_hull,symmetry,band_gap,is_stable"`
 - `sort_fields` = `"energy_above_hull"`
@@ -50,6 +51,9 @@ For each structure, call `plot_xanes`:
 - `spectroscopy_type` = VASP or FEFF
 - `open_browser` = False
 - `output_path` = `<output_dir>/<mpid>_<formula>_<element>_<model>.html`
+
+Use `~/tmp/xanes_analysis` when the user does not name an output directory, so
+the Chainlit UI can discover and render generated HTML files.
 
 Report success/failure per structure. Skip silently failed structures with a warning.
 
@@ -107,7 +111,7 @@ from scipy.stats import pearsonr, spearmanr, kendalltau
 
 def compare(ex, ey, ee, ei, shift, n_grid=400):
     ex_s = ex + shift
-    e_lo = max(ex_s.min(), ee.min(), ee.min())
+    e_lo = max(ex_s.min(), ee.min())
     e_hi = min(ex_s.max(), ee.max())
     if e_hi - e_lo < 5.0:
         return None
@@ -141,7 +145,8 @@ Create an interactive Plotly figure with one panel per experimental standard:
 - Each panel shows the experimental curve (dashed/dotted) and all predicted curves (solid)
 - The best-matching structure uses a thicker line (width=2.5, opacity=1.0)
 - All curves plotted at the optimal shift
-- Save as `comparison_per_standard.html` and take a playwright screenshot as `figure_per_standard.png`
+- Save as `comparison_per_standard.html`.
+- Take a Playwright screenshot as `figure_per_standard.png` only if Playwright is installed and launches quickly. If browser setup fails or takes longer than 15 seconds, skip the PNG and report that the interactive HTML was generated.
 
 ```python
 # playwright screenshot

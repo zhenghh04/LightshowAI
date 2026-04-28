@@ -62,8 +62,6 @@ def _csv_to_list(raw: str) -> list[str]:
 def _range(min_value: float | int | None, max_value: float | int | None):
     if min_value is None and max_value is None:
         return None
-    if min_value is None or max_value is None:
-        raise ValueError("Both min and max values must be provided together.")
     return (min_value, max_value)
 
 
@@ -124,6 +122,8 @@ async def mp_search_materials(
     exclude_elements: str = "",
     band_gap_min: float | None = None,
     band_gap_max: float | None = None,
+    energy_above_hull_min: float | None = None,
+    energy_above_hull_max: float | None = None,
     is_stable: bool | None = None,
     is_metal: bool | None = None,
     num_elements_min: int | None = None,
@@ -145,6 +145,8 @@ async def mp_search_materials(
         exclude_elements: Optional comma-separated elements to exclude.
         band_gap_min: Minimum band gap in eV.
         band_gap_max: Maximum band gap in eV.
+        energy_above_hull_min: Minimum energy above hull in eV/atom.
+        energy_above_hull_max: Maximum energy above hull in eV/atom.
         is_stable: Filter for stable materials.
         is_metal: Filter for metals/non-metals.
         num_elements_min: Minimum number of elements.
@@ -165,6 +167,7 @@ async def mp_search_materials(
             elements=_csv_to_list(elements) or None,
             exclude_elements=_csv_to_list(exclude_elements) or None,
             band_gap=_range(band_gap_min, band_gap_max),
+            energy_above_hull=_range(energy_above_hull_min, energy_above_hull_max),
             is_stable=is_stable,
             is_metal=is_metal,
             num_elements=_range(num_elements_min, num_elements_max),

@@ -99,6 +99,8 @@ sudo journalctl -u lightshowai-chatbot -f
 | `CLAUDE_MODEL` | optional | Default `claude-opus-4-7`. Set to `claude-sonnet-4-6` if your key lacks 4-7 access (`400 Invalid model name`). |
 | `PLOTS_PUBLIC_URL` | recommended | Browser-visible URL for `~/tmp/*.html` artifacts served by `lightshowai-plots.service`, e.g. `http://<ec2-public-ip>:8001`. |
 | `MLFLOW_TRACKING_INSECURE_TLS` | optional | Default `false`. Set to `true` only as a temporary workaround for a certificate-chain problem. |
+| `MLFLOW_HTTP_REQUEST_TIMEOUT` | optional | Default `10`. Bounds MLflow network calls so logging cannot stall the chat for minutes. |
+| `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | optional | Default `1`. Keeps MLflow logging failures quick. |
 
 ## Try it
 
@@ -125,6 +127,7 @@ stream the prose answer, and embed any `~/tmp/*.html` plots/viewers inline.
 | `400 Invalid model name passed in model=claude-opus-4-7` | Your key lacks Opus 4.7 access — set `CLAUDE_MODEL=claude-sonnet-4-6` in `.env` and restart |
 | Browser shows nothing at the URL | Port 8000 not allowed in the EC2 security group |
 | HTML plot message appears but iframe is blank | `lightshowai-plots.service` is not running, port 8001 is blocked, or `PLOTS_PUBLIC_URL` points somewhere the browser cannot reach |
+| Chat reply completes but UI stays busy for a while | MLflow logging is slow. Set `MLFLOW_HTTP_REQUEST_TIMEOUT=10` and `MLFLOW_HTTP_REQUEST_MAX_RETRIES=1`, or unset `AM_SC_API_KEY` to disable chatbot auto-logging. |
 | Repeated `InsecureRequestWarning` from `urllib3` | Set `MLFLOW_TRACKING_INSECURE_TLS=false` in `.env` and restart. If TLS verification then fails, install/update CA certificates or fix the MLflow server certificate chain. |
 | `ANTHROPIC_API_KEY not set` on startup | `.env` not loaded — check the file exists and the systemd `EnvironmentFile=` path |
 | MCP "tool not found" | The MCP subprocess crashed — `journalctl -u lightshowai-chatbot` for stderr |

@@ -65,11 +65,12 @@ class MaterialsProjectClient:
         chemsys: str | list[str] | None = None,
         elements: list[str] | None = None,
         exclude_elements: list[str] | None = None,
-        band_gap: tuple[float, float] | None = None,
+        band_gap: tuple[float | None, float | None] | None = None,
+        energy_above_hull: tuple[float | None, float | None] | None = None,
         is_stable: bool | None = None,
         is_metal: bool | None = None,
-        num_elements: tuple[int, int] | None = None,
-        num_sites: tuple[int, int] | None = None,
+        num_elements: tuple[int | None, int | None] | None = None,
+        num_sites: tuple[int | None, int | None] | None = None,
         spacegroup_symbol: str | list[str] | None = None,
         fields: list[str] | None = None,
         limit: int = 10,
@@ -89,18 +90,29 @@ class MaterialsProjectClient:
         if exclude_elements:
             params["exclude_elements"] = self._csv(exclude_elements)
         if band_gap:
-            params["band_gap_min"] = band_gap[0]
-            params["band_gap_max"] = band_gap[1]
+            if band_gap[0] is not None:
+                params["band_gap_min"] = band_gap[0]
+            if band_gap[1] is not None:
+                params["band_gap_max"] = band_gap[1]
+        if energy_above_hull:
+            if energy_above_hull[0] is not None:
+                params["energy_above_hull_min"] = energy_above_hull[0]
+            if energy_above_hull[1] is not None:
+                params["energy_above_hull_max"] = energy_above_hull[1]
         if is_stable is not None:
             params["is_stable"] = is_stable
         if is_metal is not None:
             params["is_metal"] = is_metal
         if num_elements:
-            params["nelements_min"] = num_elements[0]
-            params["nelements_max"] = num_elements[1]
+            if num_elements[0] is not None:
+                params["nelements_min"] = num_elements[0]
+            if num_elements[1] is not None:
+                params["nelements_max"] = num_elements[1]
         if num_sites:
-            params["nsites_min"] = num_sites[0]
-            params["nsites_max"] = num_sites[1]
+            if num_sites[0] is not None:
+                params["nsites_min"] = num_sites[0]
+            if num_sites[1] is not None:
+                params["nsites_max"] = num_sites[1]
         if spacegroup_symbol:
             params["spacegroup_symbol"] = self._csv(spacegroup_symbol)
         if sort_fields:

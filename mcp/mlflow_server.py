@@ -143,6 +143,8 @@ def effective_max_results(max_results: int) -> int:
 
 load_examples_env()
 os.environ.setdefault("MLFLOW_TRACKING_INSECURE_TLS", "false")
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
 configure_insecure_tls_warnings()
 enable_amsc_x_api_key()
 mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI))
@@ -268,6 +270,8 @@ def describe_server_config() -> dict:
     return {
         "mlflow_tracking_uri": os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI),
         "mlflow_tracking_insecure_tls": os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "false"),
+        "mlflow_http_request_timeout": os.environ.get("MLFLOW_HTTP_REQUEST_TIMEOUT", "10"),
+        "mlflow_http_request_max_retries": os.environ.get("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1"),
         "has_am_sc_api_key": AMSC_API_KEY_ENV in os.environ and bool(os.environ.get(AMSC_API_KEY_ENV)),
         "default_max_results": int(os.environ.get("MLFLOW_MCP_MAX_RESULTS", str(DEFAULT_MAX_RESULTS))),
     }

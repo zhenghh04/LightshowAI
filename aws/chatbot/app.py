@@ -99,8 +99,12 @@ MLFLOW_TRACKING_URI = os.environ.get(
 )
 MLFLOW_EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT", "LightshowAI-XANES-chatbot")
 MLFLOW_INSECURE_TLS = os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "false")
+MLFLOW_HTTP_TIMEOUT = os.environ.get("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
+MLFLOW_HTTP_MAX_RETRIES = os.environ.get("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
 
 os.environ.setdefault("MLFLOW_TRACKING_INSECURE_TLS", MLFLOW_INSECURE_TLS)
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", MLFLOW_HTTP_TIMEOUT)
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", MLFLOW_HTTP_MAX_RETRIES)
 
 
 def _is_enabled(value: str) -> bool:
@@ -146,10 +150,10 @@ if MLFLOW_ENABLED:
     try:
         _patch_mlflow_x_api_key(AM_SC_API_KEY)
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(MLFLOW_EXPERIMENT)
         sys.stderr.write(
-            f"[chatbot] MLflow logging to {MLFLOW_TRACKING_URI} "
-            f"experiment='{MLFLOW_EXPERIMENT}'\n"
+            f"[chatbot] MLflow logging configured for {MLFLOW_TRACKING_URI} "
+            f"experiment='{MLFLOW_EXPERIMENT}' timeout={MLFLOW_HTTP_TIMEOUT}s "
+            f"retries={MLFLOW_HTTP_MAX_RETRIES}\n"
         )
     except Exception as exc:
         sys.stderr.write(f"[chatbot] MLflow init failed (logging disabled): {exc}\n")
@@ -269,7 +273,8 @@ def _extract_html_files(text: str) -> list[Path]:
 
 def _html_url(path: Path) -> str:
     """Return the browser-visible URL for a saved HTML artifact."""
-    return f"{PLOTS_PUBLIC_URL}/{quote(path.name)}"
+    rel_path = path.resolve().relative_to(PLOT_DIR.resolve()).as_posix()
+    return f"{PLOTS_PUBLIC_URL}/{quote(rel_path, safe='/')}"
 
 
 def _html_label(path: Path) -> str:
@@ -365,56 +370,62 @@ async def on_chat_start() -> None:
 async def on_chat_end() -> None:
     client: ClaudeSDKClient | None = cl.user_session.get("client")
     if client is not None:
-        await client.__aexit__(None, None, None)
+        try:
+            await client.__aexit__(None, None, None)
+        except Exception as exc:
+            if not _is_sigterm_exit(exc):
+                sys.stderr.write(f"[chatbot] client shutdown failed: {exc}\n")
 
 
 # --- MLflow run helpers -----------------------------------------------------
-def _mlflow_start_turn(prompt: str, user: str, session_id: str):
-    """Start an MLflow run for one chat turn. Returns the run object or None."""
+def _mlflow_start_turn(prompt: str, user: str, session_id: str) -> dict[str, str] | None:
+    """Capture turn metadata without making network calls before the reply."""
     if not MLFLOW_ENABLED:
         return None
-    try:
-        run = mlflow.start_run(
-            run_name=f"{(prompt[:40] or 'turn').strip()}-{uuid.uuid4().hex[:6]}",
-        )
-        mlflow.log_param("model", MODEL)
-        mlflow.log_param("prompt", prompt[:500])
-        mlflow.log_param("user", user)
-        mlflow.set_tag("session_id", session_id)
-        mlflow.set_tag("source", "lightshowai-chatbot")
-        return run
-    except Exception as exc:
-        sys.stderr.write(f"[chatbot] mlflow.start_run failed: {exc}\n")
-        return None
+    return {
+        "run_name": f"{(prompt[:40] or 'turn').strip()}-{uuid.uuid4().hex[:6]}",
+        "prompt": prompt[:500],
+        "user": user,
+        "session_id": session_id,
+    }
 
 
 def _mlflow_finish_turn(
-    run, *, latency_s: float, tool_calls: int, tool_names: list[str],
-    response_text: str, artifacts: list[Path],
+    run_meta: dict[str, str] | None,
+    *,
+    latency_s: float,
+    tool_calls: int,
+    tool_names: list[str],
+    response_text: str,
+    artifacts: list[Path],
 ) -> None:
-    """Log metrics, response, and artifact files; end the run. Errors are logged but not raised."""
-    if run is None:
+    """Log metrics, response, and artifact files; errors are logged but not raised."""
+    if run_meta is None:
         return
     try:
-        mlflow.log_metric("latency_seconds", round(latency_s, 3))
-        mlflow.log_metric("tool_calls", tool_calls)
-        mlflow.log_metric("response_chars", len(response_text or ""))
-        if tool_names:
-            mlflow.log_param("tools_used", ",".join(tool_names)[:500])
-        if response_text:
-            mlflow.log_text(response_text, "response.md")
-        for art in artifacts:
-            try:
-                mlflow.log_artifact(str(art), artifact_path="plots")
-            except Exception as exc:
-                sys.stderr.write(f"[chatbot] log_artifact({art.name}) failed: {exc}\n")
+        mlflow.set_experiment(MLFLOW_EXPERIMENT)
+        with mlflow.start_run(run_name=run_meta["run_name"]):
+            mlflow.log_param("model", MODEL)
+            mlflow.log_param("prompt", run_meta["prompt"])
+            mlflow.log_param("user", run_meta["user"])
+            mlflow.set_tag("session_id", run_meta["session_id"])
+            mlflow.set_tag("source", "lightshowai-chatbot")
+            mlflow.log_metric("latency_seconds", round(latency_s, 3))
+            mlflow.log_metric("tool_calls", tool_calls)
+            mlflow.log_metric("response_chars", len(response_text or ""))
+            if tool_names:
+                mlflow.log_param("tools_used", ",".join(tool_names)[:500])
+            if response_text:
+                mlflow.log_text(response_text, "response.md")
+            for art in artifacts:
+                try:
+                    mlflow.log_artifact(str(art), artifact_path="plots")
+                except Exception as exc:
+                    sys.stderr.write(
+                        f"[chatbot] log_artifact({art.name}) failed: {exc}\n"
+                    )
     except Exception as exc:
         sys.stderr.write(f"[chatbot] mlflow log failed: {exc}\n")
-    finally:
-        try:
-            mlflow.end_run()
-        except Exception:
-            pass
 
 
 def _is_sigterm_exit(exc: Exception) -> bool:
@@ -426,8 +437,19 @@ def _is_sigterm_exit(exc: Exception) -> bool:
 # --- Message handler --------------------------------------------------------
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
-    client: ClaudeSDKClient = cl.user_session.get("client")
-    steps: dict[str, cl.Step] = cl.user_session.get("steps")
+    client: ClaudeSDKClient | None = cl.user_session.get("client")
+    if client is None:
+        await cl.Message(
+            content=(
+                "The agent session is not initialized. Refresh the page and "
+                "start a new chat."
+            )
+        ).send()
+        return
+
+    steps: dict[str, cl.Step] = cl.user_session.get("steps") or {}
+    steps.clear()
+    cl.user_session.set("steps", steps)
 
     user = cl.user_session.get("user")
     user_id = getattr(user, "identifier", "anon") if user else "anon"
@@ -439,6 +461,7 @@ async def on_message(message: cl.Message) -> None:
     tool_names: list[str] = []
     artifacts: list[Path] = []
     assistant_text: list[str] = []
+    skip_mlflow_finish = False
     cl.user_session.set("rendered_html_paths", set())
 
     reply = cl.Message(content="")
@@ -478,6 +501,7 @@ async def on_message(message: cl.Message) -> None:
         artifacts.extend(await _render_html_files("".join(assistant_text)))
     except Exception as exc:
         if _is_sigterm_exit(exc):
+            skip_mlflow_finish = True
             sys.stderr.write(
                 "[chatbot] Claude CLI exited with 143/SIGTERM during service shutdown; "
                 "suppressing traceback.\n"
@@ -485,11 +509,12 @@ async def on_message(message: cl.Message) -> None:
             return
         raise
     finally:
-        _mlflow_finish_turn(
-            run,
-            latency_s=time.monotonic() - t0,
-            tool_calls=tool_calls,
-            tool_names=tool_names,
-            response_text="".join(assistant_text),
-            artifacts=artifacts,
-        )
+        if not skip_mlflow_finish:
+            _mlflow_finish_turn(
+                run,
+                latency_s=time.monotonic() - t0,
+                tool_calls=tool_calls,
+                tool_names=tool_names,
+                response_text="".join(assistant_text),
+                artifacts=artifacts,
+            )
