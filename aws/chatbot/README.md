@@ -128,6 +128,7 @@ stream the prose answer, and embed any `~/tmp/*.html` plots/viewers inline.
 | `400 Invalid model name passed in model=claude-opus-4-7` | Your key lacks Opus 4.7 access — set `CLAUDE_MODEL=claude-sonnet-4-6` in `.env` and restart |
 | Browser shows nothing at the URL | Port 8000 not allowed in the EC2 security group |
 | HTML plot message appears but iframe is blank | `lightshowai-plots.service` is not running, port 8001 is blocked, or `PLOTS_PUBLIC_URL` points somewhere the browser cannot reach |
+| Agent asks for an experimental data path after upload | Restart after deploying this version. Uploaded files are copied to `~/tmp/uploads/<session>/...` and their paths are appended to the agent prompt. |
 | Chat reply completes but UI stays busy for a while | MLflow logging is slow. Set `MLFLOW_HTTP_REQUEST_TIMEOUT=10` and `MLFLOW_HTTP_REQUEST_MAX_RETRIES=1`, or unset `AM_SC_API_KEY` to disable chatbot auto-logging. |
 | Empty assistant bubble never finishes | The Claude SDK turn is wedged. Set/keep `CHAINLIT_CHAT_TURN_TIMEOUT_S=900`; after timeout, refresh and start a new chat. |
 | Repeated `InsecureRequestWarning` from `urllib3` | Set `MLFLOW_TRACKING_INSECURE_TLS=false` in `.env` and restart. If TLS verification then fails, install/update CA certificates or fix the MLflow server certificate chain. |

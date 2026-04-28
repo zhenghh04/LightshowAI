@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -55,6 +56,9 @@ MCP_DIR = LIGHTSHOWAI_DIR / "mcp"
 # isn't available in every Chainlit version. The separate process is bulletproof.
 PLOT_DIR = Path.home() / "tmp"
 PLOT_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR = PLOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+_MISSING = object()
 
 # Public hostname/IP the BROWSER reaches the static server at. The chatbot
 # itself never connects to this — only the user's browser does.
@@ -194,6 +198,13 @@ File output convention (REQUIRED — the chat UI auto-renders files in ~/tmp/):
       - mp_visualize_structure        → output_path="~/tmp/<material_id>_structure.html"
   • Use ~/tmp/ for everything. Do not write to ~/Downloads/ — it doesn't exist.
   • Pass open_browser=False (the user views via the chat, not a local browser).
+
+Uploaded files:
+  • When the user uploads files, the chat UI appends their stable local paths to
+    the user message. Use those exact paths. Do not ask the user for a file path
+    when an uploaded .dat file path is already listed.
+  • For experimental XANES data, treat uploaded .dat files as standards and use
+    their parent directory as the experimental data directory.
 
 Slash commands available (located in .claude/commands/ within this bundle):
   • /xanes-analysis — full Ti/Fe/V/etc K-edge benchmarking workflow vs experimental
@@ -343,6 +354,114 @@ async def _render_html_files(text: str) -> list[Path]:
     return artifacts
 
 
+# --- User uploads -----------------------------------------------------------
+def _safe_path_part(value: str, default: str) -> str:
+    """Return a filesystem-safe name while preserving useful extensions."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned or default
+
+
+def _element_value(element: object, key: str, default=None):
+    """Read a Chainlit element field across dataclass/object/dict versions."""
+    if isinstance(element, dict):
+        return element.get(key, default)
+    value = getattr(element, key, _MISSING)
+    if value is not _MISSING:
+        return value
+    to_dict = getattr(element, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return to_dict().get(key, default)
+        except Exception:
+            return default
+    return default
+
+
+def _unique_upload_path(upload_dir: Path, filename: str) -> Path:
+    candidate = upload_dir / filename
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    return upload_dir / f"{stem}_{uuid.uuid4().hex[:8]}{suffix}"
+
+
+def _persist_message_uploads(message: cl.Message, session_id: str) -> list[dict[str, str]]:
+    """Copy uploaded files to stable paths that the Claude CLI can read."""
+    uploads: list[dict[str, str]] = []
+    elements = getattr(message, "elements", None) or []
+    if not elements:
+        return uploads
+
+    session_dir = UPLOAD_DIR / _safe_path_part(session_id, "session")
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    for element in elements:
+        source_raw = _element_value(element, "path")
+        name = str(_element_value(element, "name", "") or "")
+        mime = str(_element_value(element, "mime", "") or "")
+        if not source_raw:
+            sys.stderr.write(f"[chatbot] uploaded element has no local path: {name}\n")
+            continue
+
+        source = Path(str(source_raw)).expanduser()
+        if not source.is_file():
+            sys.stderr.write(
+                f"[chatbot] uploaded element path is not readable: {source}\n"
+            )
+            continue
+
+        filename = _safe_path_part(name or source.name, source.name or "upload.dat")
+        dest = _unique_upload_path(session_dir, filename)
+        try:
+            shutil.copy2(source, dest)
+        except Exception as exc:
+            sys.stderr.write(f"[chatbot] failed to copy uploaded file {source}: {exc}\n")
+            continue
+
+        uploads.append(
+            {
+                "name": name or source.name,
+                "path": str(dest),
+                "directory": str(dest.parent),
+                "mime": mime or "unknown",
+                "size_bytes": str(dest.stat().st_size),
+            }
+        )
+    return uploads
+
+
+def _build_agent_prompt(user_text: str, uploads: list[dict[str, str]]) -> str:
+    """Append uploaded file paths to the prompt sent to the Claude agent."""
+    if not uploads:
+        return user_text
+
+    upload_lines = [
+        "The user uploaded files with this message. The Chainlit app copied them "
+        "to these stable local paths readable by your tools and Python scripts:",
+    ]
+    for upload in uploads:
+        upload_lines.append(
+            "- "
+            f"{upload['name']}: {upload['path']} "
+            f"(directory: {upload['directory']}, mime: {upload['mime']}, "
+            f"size: {upload['size_bytes']} bytes)"
+        )
+
+    dat_dirs = sorted(
+        {u["directory"] for u in uploads if u["path"].lower().endswith(".dat")}
+    )
+    if dat_dirs:
+        upload_lines.append(
+            "For experimental XANES .dat standards, use these directories directly: "
+            + ", ".join(dat_dirs)
+            + ". Do not ask the user to provide a path for these uploaded files."
+        )
+
+    return "\n".join(upload_lines) + "\n\nUser message:\n" + user_text
+
+
 # --- Session lifecycle ------------------------------------------------------
 @cl.on_chat_start
 async def on_chat_start() -> None:
@@ -468,8 +587,10 @@ async def on_message(message: cl.Message) -> None:
     user = cl.user_session.get("user")
     user_id = getattr(user, "identifier", "anon") if user else "anon"
     session_id = cl.user_session.get("id") or "unknown"
+    uploads = _persist_message_uploads(message, session_id)
+    agent_prompt = _build_agent_prompt(message.content, uploads)
 
-    run = _mlflow_start_turn(message.content, user_id, session_id)
+    run = _mlflow_start_turn(agent_prompt, user_id, session_id)
     t0 = time.monotonic()
     tool_calls = 0
     tool_names: list[str] = []
@@ -483,7 +604,7 @@ async def on_message(message: cl.Message) -> None:
 
     try:
         async with asyncio.timeout(CHAT_TURN_TIMEOUT_S):
-            await client.query(message.content)
+            await client.query(agent_prompt)
 
             async for msg in client.receive_response():
                 if not isinstance(msg, AssistantMessage):

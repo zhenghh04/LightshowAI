@@ -59,12 +59,17 @@ Report success/failure per structure. Skip silently failed structures with a war
 
 ## Step 3: Load experimental standards
 
+If the user uploaded `.dat` files, the Chainlit app adds their stable local paths
+to the message. Use those exact paths or their parent directories immediately.
+Do not ask the user for a path when uploaded `.dat` paths are listed.
+
 Scan the experimental data directory for `*.dat` files. Each file is one experimental standard named by the phase (e.g. `anatase.dat`, `rutile.dat`). Load each:
 - Two columns: energy (eV) and intensity
 - Skip header/comment lines (non-numeric)
 - Report energy range and number of points for each standard
 
-If no `.dat` files are found, ask the user to provide the directory.
+If no uploaded `.dat` paths are listed and no `.dat` files are found in the
+requested/default directory, ask the user to upload files or provide a directory.
 
 ## Step 4: Extract predicted spectra from HTML
 
