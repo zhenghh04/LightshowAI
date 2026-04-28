@@ -15,12 +15,14 @@ Run on EC2 via systemd: see lightshowai-chatbot.service.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
 from pathlib import Path
 
 import chainlit as cl
+import plotly.io as pio
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -187,32 +189,70 @@ def _extract_html_files(text: str) -> list[Path]:
     return out
 
 
-async def _send_iframe(path: Path) -> None:
-    """Render one HTML file inline, with multiple fallbacks.
+_PLOTLY_FIG_RE = re.compile(
+    r'Plotly\.newPlot\(\s*"[^"]+",\s*(\[.*?\])\s*,\s*({.*?})\s*[,)]',
+    re.DOTALL,
+)
 
-    Chainlit's markdown renderer strips raw <iframe> tags in some versions even
-    with unsafe_allow_html=true. To guarantee the user sees the visualization
-    one way or another, send THREE things in one message:
 
-      1. A clickable markdown link to open the file in a new tab — always works
-      2. A cl.CustomElement('iframe', src=...) — renders inline if
-         public/elements/iframe.jsx is on the box and Chainlit picks it up
-      3. A cl.File(display='inline') attachment — Chainlit's built-in file viewer
+def _extract_plotly_figure(path: Path) -> dict | None:
+    """Pull the Plotly figure (data + layout) out of a saved Plotly HTML file.
 
-    The src is an absolute URL pointing at the SEPARATE static-file server
-    (lightshowai-plots.service on port 8001), not Chainlit.
+    Plotly's HTML embeds the figure as `Plotly.newPlot("div", DATA, LAYOUT, ...)`
+    in a <script> tag. We regex it out and return a {data, layout} dict that
+    cl.Plotly accepts directly.
     """
+    try:
+        html = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+    m = _PLOTLY_FIG_RE.search(html)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+        layout = json.loads(m.group(2))
+    except json.JSONDecodeError:
+        return None
+    return {"data": data, "layout": layout}
+
+
+async def _send_iframe(path: Path) -> None:
+    """Render one Plotly HTML file as an inline cl.Plotly element.
+
+    Why not iframes: Chainlit's markdown renderer strips <iframe> in some
+    versions and CustomElements need a frontend rebuild on others. cl.Plotly
+    is a first-class element — Chainlit always renders it natively as a
+    real Plotly canvas.
+
+    Falls back to a clickable link to the static server (port 8001) if the
+    figure can't be extracted (non-Plotly HTML, malformed file, etc.).
+    """
+    fig = _extract_plotly_figure(path)
     url = f"{PLOTS_PUBLIC_URL}/{path.name}"
-    elements = [
-        cl.CustomElement(
-            name="iframe",
-            props={"src": url, "height": 520, "title": path.name},
-        ),
-        cl.File(name=path.name, path=str(path), display="inline"),
-    ]
+
+    if fig is None:
+        # Non-Plotly HTML or extraction failed — fall back to a link.
+        await cl.Message(
+            content=f"**{path.name}** — [open in new tab]({url}) (could not embed)",
+        ).send()
+        return
+
+    # Build a real plotly Figure; cl.Plotly accepts both Figure and dict, but
+    # going through pio.from_json() validates the structure and catches errors
+    # before they hit the React renderer.
+    try:
+        figure = pio.from_json(json.dumps(fig))
+    except Exception as e:
+        sys.stderr.write(f"[chatbot] plotly parse failed for {path.name}: {e}\n")
+        await cl.Message(
+            content=f"**{path.name}** — [open in new tab]({url}) (parse error)",
+        ).send()
+        return
+
     await cl.Message(
         content=f"**{path.name}** — [open in new tab]({url})",
-        elements=elements,
+        elements=[cl.Plotly(name=path.stem, figure=figure, display="inline")],
     ).send()
 
 
