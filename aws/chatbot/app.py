@@ -343,10 +343,8 @@ async def on_chat_start() -> None:
         mcp_servers=MCP_SERVERS,
         permission_mode="bypassPermissions",
         max_turns=30,
-        # cwd points the bundled Claude Code CLI at the LightshowAI bundle
-        # root, so it discovers .claude/commands/*.md (e.g. /xanes-analysis)
-        # and any future .claude/skills/ from the same directory.
-        cwd=str(LIGHTSHOWAI_DIR),
+        # No cwd override needed — the chatbot's own directory is the cwd,
+        # and .claude/commands/xanes-analysis.md sits next to this app.py.
     )
     client = ClaudeSDKClient(options=options)
     await client.__aenter__()
