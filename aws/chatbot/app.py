@@ -30,7 +30,6 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 from dotenv import load_dotenv
-from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
@@ -42,33 +41,22 @@ load_dotenv()
 LIGHTSHOWAI_DIR = Path(__file__).resolve().parents[2]
 MCP_DIR = LIGHTSHOWAI_DIR / "mcp"
 
-# Plotly HTML files (XANES plots + crystal structures) land here. Served
-# at /plots/ so iframes embedded in chat messages can pull them inline.
-# Mounted from the Chainlit startup hook so the route attaches AFTER
-# Chainlit's FastAPI app is fully built (a module-level mount silently gets
-# replaced when Chainlit rebuilds its app during startup).
+# Plotly HTML files (XANES plots + crystal structures) land here. Served by a
+# SEPARATE static-file server (see lightshowai-plots.service) on PLOT_PORT so
+# the iframes embedded in chat messages can pull them inline.
+#
+# Why not mount in-process via Chainlit's FastAPI: Chainlit rebuilds its app
+# during startup, which silently drops module-level mounts, and on_app_startup
+# isn't available in every Chainlit version. The separate process is bulletproof.
 PLOT_DIR = Path.home() / "tmp"
 PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
-
-def _mount_plots_dir_once() -> None:
-    """Attach /plots/ -> ~/tmp/ on the live FastAPI app, idempotently."""
-    from chainlit.server import app as fastapi_app
-    if not any(getattr(r, "name", None) == "plots" for r in fastapi_app.routes):
-        fastapi_app.mount(
-            "/plots",
-            StaticFiles(directory=str(PLOT_DIR)),
-            name="plots",
-        )
-        sys.stderr.write(f"[chatbot] mounted /plots -> {PLOT_DIR}\n")
-
-
-# Newer Chainlit (>=1.x) exposes on_app_startup; fall through to first-message
-# mount if the decorator isn't available.
-if hasattr(cl, "on_app_startup"):
-    @cl.on_app_startup
-    async def _startup_mount_plots() -> None:
-        _mount_plots_dir_once()
+# Public hostname/IP the BROWSER reaches the static server at. The chatbot
+# itself never connects to this — only the user's browser does.
+# Default to localhost for local dev; on EC2 set PLOTS_PUBLIC_URL in .env.
+PLOTS_PUBLIC_URL = os.environ.get(
+    "PLOTS_PUBLIC_URL", "http://localhost:8001"
+).rstrip("/")
 
 MP_API_KEY = os.environ.get("MP_API_KEY", "")
 SHARED_PASSWORD = os.environ.get("CHAINLIT_PASSWORD", "")
@@ -126,6 +114,16 @@ and ask whether they want you to proceed anyway.
 # --- MCP server config ------------------------------------------------------
 PYTHON = sys.executable
 
+# AmSC MLflow tracking via the user's own MCP server (vendored from
+# Documents/Research/AmSC/mlflow/intro-to-mlflow-pytorch/mcp_server/server.py).
+# Auth env name on that server is AM_SC_API_KEY; tracking URI defaults to
+# https://mlflow.american-science-cloud.org. Both can be overridden in .env.
+AM_SC_API_KEY = os.environ.get("AM_SC_API_KEY", "")
+MLFLOW_TRACKING_URI = os.environ.get(
+    "MLFLOW_TRACKING_URI", "https://mlflow.american-science-cloud.org"
+)
+MLFLOW_TRACKING_INSECURE_TLS = os.environ.get("MLFLOW_TRACKING_INSECURE_TLS", "true")
+
 MCP_SERVERS = {
     "materials-project": {
         "type": "stdio",
@@ -140,6 +138,16 @@ MCP_SERVERS = {
         "env": {
             "MP_API_KEY": MP_API_KEY,
             "PYTHONPATH": str(LIGHTSHOWAI_DIR),
+        },
+    },
+    "mlflow-amsc": {
+        "type": "stdio",
+        "command": PYTHON,
+        "args": [str(MCP_DIR / "mlflow_server.py")],
+        "env": {
+            "AM_SC_API_KEY": AM_SC_API_KEY,
+            "MLFLOW_TRACKING_URI": MLFLOW_TRACKING_URI,
+            "MLFLOW_TRACKING_INSECURE_TLS": MLFLOW_TRACKING_INSECURE_TLS,
         },
     },
 }
@@ -185,8 +193,12 @@ async def _send_iframe(path: Path) -> None:
     Uses raw <iframe> markup (works because unsafe_allow_html=true in
     .chainlit/config.toml) PLUS a cl.File attachment as a clickable
     fallback in case the browser blocks the iframe.
+
+    The iframe src is an absolute URL pointing at the SEPARATE static-file
+    server (lightshowai-plots.service on port 8001), not Chainlit. This
+    sidesteps Chainlit's lifespan replacing in-process route mounts.
     """
-    url = f"/plots/{path.name}"
+    url = f"{PLOTS_PUBLIC_URL}/{path.name}"
     iframe_html = (
         f'<iframe src="{url}" '
         f'style="width:100%; height:520px; border:1px solid #243240; '
