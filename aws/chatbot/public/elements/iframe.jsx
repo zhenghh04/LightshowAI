@@ -2,9 +2,10 @@
 // inside the Chainlit chat. `props.src` is served by lightshowai-plots.service.
 
 export default function Iframe() {
-  const src = props?.src || "";
-  const height = Number(props?.height) || 520;
-  const title = props?.title || "HTML preview";
+  const currentProps = typeof props === "undefined" ? {} : props;
+  const src = typeof currentProps.src === "string" ? currentProps.src : "";
+  const height = Number(currentProps.height) || 520;
+  const title = currentProps.title || "HTML preview";
 
   if (!src) {
     return (
