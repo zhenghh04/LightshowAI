@@ -101,6 +101,7 @@ sudo journalctl -u lightshowai-chatbot -f
 | `MLFLOW_TRACKING_INSECURE_TLS` | optional | Default `false`. Set to `true` only as a temporary workaround for a certificate-chain problem. |
 | `MLFLOW_HTTP_REQUEST_TIMEOUT` | optional | Default `10`. Bounds MLflow network calls so logging cannot stall the chat for minutes. |
 | `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | optional | Default `1`. Keeps MLflow logging failures quick. |
+| `CHAINLIT_CHAT_TURN_TIMEOUT_S` | optional | Default `900`. Resets a wedged Claude SDK turn instead of leaving an empty assistant bubble indefinitely. |
 
 ## Try it
 
@@ -128,6 +129,7 @@ stream the prose answer, and embed any `~/tmp/*.html` plots/viewers inline.
 | Browser shows nothing at the URL | Port 8000 not allowed in the EC2 security group |
 | HTML plot message appears but iframe is blank | `lightshowai-plots.service` is not running, port 8001 is blocked, or `PLOTS_PUBLIC_URL` points somewhere the browser cannot reach |
 | Chat reply completes but UI stays busy for a while | MLflow logging is slow. Set `MLFLOW_HTTP_REQUEST_TIMEOUT=10` and `MLFLOW_HTTP_REQUEST_MAX_RETRIES=1`, or unset `AM_SC_API_KEY` to disable chatbot auto-logging. |
+| Empty assistant bubble never finishes | The Claude SDK turn is wedged. Set/keep `CHAINLIT_CHAT_TURN_TIMEOUT_S=900`; after timeout, refresh and start a new chat. |
 | Repeated `InsecureRequestWarning` from `urllib3` | Set `MLFLOW_TRACKING_INSECURE_TLS=false` in `.env` and restart. If TLS verification then fails, install/update CA certificates or fix the MLflow server certificate chain. |
 | `ANTHROPIC_API_KEY not set` on startup | `.env` not loaded — check the file exists and the systemd `EnvironmentFile=` path |
 | MCP "tool not found" | The MCP subprocess crashed — `journalctl -u lightshowai-chatbot` for stderr |

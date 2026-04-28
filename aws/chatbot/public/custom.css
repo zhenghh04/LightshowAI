@@ -61,3 +61,53 @@ button[type="submit"]:hover {
   max-height: 40px;
   margin: 4px 8px;
 }
+
+/* ----------------------------------------------------------------------
+ * Welcome screen — enlarge the assistant avatar above the input box.
+ * Chainlit's avatar element class moves around between releases, so we
+ * target several known selectors with !important to cover all versions.
+ * ---------------------------------------------------------------------- */
+
+/* Generic avatar img — bumps small chip avatars too */
+img[alt*="vatar" i],
+.MuiAvatar-img {
+  width: auto !important;
+  height: auto !important;
+}
+
+/* Welcome state: the centered "AmSC LightshowAI" header above the input
+   uses a noticeably larger avatar slot. Scale by class + parent shape. */
+.welcome-screen img,
+[class*="WelcomeScreen"] img,
+[class*="welcome"] img,
+.cl-empty-screen img,
+.empty-state img,
+.assistant-profile img,
+[class*="AssistantProfile"] img {
+  width: 96px !important;
+  height: 96px !important;
+  max-width: 96px !important;
+  max-height: 96px !important;
+  border-radius: 18px;
+}
+
+/* Same area — nudge the title text a bit larger so the new avatar size
+   reads as deliberate, not just "wrong proportions". */
+.welcome-screen h1,
+[class*="WelcomeScreen"] h1,
+[class*="welcome"] h1,
+.cl-empty-screen h1,
+.empty-state h1,
+.assistant-profile h2,
+[class*="AssistantProfile"] h2 {
+  font-size: 1.85rem !important;
+  line-height: 1.2 !important;
+}
+
+/* In-chat assistant bubble avatar — keep small (don't blow up every
+   message); only the welcome-state hero avatar is enlarged above. */
+.message-row .MuiAvatar-root,
+[class*="message"] .MuiAvatar-root {
+  width: 32px;
+  height: 32px;
+}

@@ -15,6 +15,7 @@ Run on EC2 via systemd: see lightshowai-chatbot.service.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sys
@@ -64,6 +65,7 @@ PLOTS_PUBLIC_URL = os.environ.get(
 
 MP_API_KEY = os.environ.get("MP_API_KEY", "")
 SHARED_PASSWORD = os.environ.get("CHAINLIT_PASSWORD", "")
+CHAT_TURN_TIMEOUT_S = int(os.environ.get("CHAINLIT_CHAT_TURN_TIMEOUT_S", "900"))
 
 # Model: prefer the AmSC i2 convention (ANTHROPIC_MODEL), then legacy CLAUDE_MODEL,
 # then a sensible default for the i2 gateway.
@@ -232,6 +234,8 @@ MCP_SERVERS = {
             "AM_SC_API_KEY": AM_SC_API_KEY,
             "MLFLOW_TRACKING_URI": MLFLOW_TRACKING_URI,
             "MLFLOW_TRACKING_INSECURE_TLS": MLFLOW_INSECURE_TLS,
+            "MLFLOW_HTTP_REQUEST_TIMEOUT": MLFLOW_HTTP_TIMEOUT,
+            "MLFLOW_HTTP_REQUEST_MAX_RETRIES": MLFLOW_HTTP_MAX_RETRIES,
         },
     },
 }
@@ -434,6 +438,16 @@ def _is_sigterm_exit(exc: Exception) -> bool:
     return "exit code 143" in message or "exit code: 143" in message
 
 
+async def _reset_client_after_failure(client: ClaudeSDKClient) -> None:
+    """Close a wedged SDK client; the browser should start a new chat session."""
+    try:
+        await client.__aexit__(None, None, None)
+    except Exception as exc:
+        if not _is_sigterm_exit(exc):
+            sys.stderr.write(f"[chatbot] client reset failed: {exc}\n")
+    cl.user_session.set("client", None)
+
+
 # --- Message handler --------------------------------------------------------
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
@@ -468,37 +482,51 @@ async def on_message(message: cl.Message) -> None:
     await reply.send()
 
     try:
-        await client.query(message.content)
+        async with asyncio.timeout(CHAT_TURN_TIMEOUT_S):
+            await client.query(message.content)
 
-        async for msg in client.receive_response():
-            if not isinstance(msg, AssistantMessage):
-                continue
-            for block in msg.content:
-                if isinstance(block, TextBlock):
-                    assistant_text.append(block.text)
-                    await reply.stream_token(block.text)
+            async for msg in client.receive_response():
+                if not isinstance(msg, AssistantMessage):
+                    continue
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        assistant_text.append(block.text)
+                        await reply.stream_token(block.text)
 
-                elif isinstance(block, ToolUseBlock):
-                    step = cl.Step(name=block.name, type="tool")
-                    step.input = block.input
-                    steps[block.id] = step
-                    await step.send()
-                    tool_calls += 1
-                    tool_names.append(block.name)
+                    elif isinstance(block, ToolUseBlock):
+                        step = cl.Step(name=block.name, type="tool")
+                        step.input = block.input
+                        steps[block.id] = step
+                        await step.send()
+                        tool_calls += 1
+                        tool_names.append(block.name)
 
-                elif isinstance(block, ToolResultBlock):
-                    step = steps.pop(block.tool_use_id, None)
-                    if step is None:
-                        continue
-                    step.output = block.content
-                    if getattr(block, "is_error", False):
-                        step.is_error = True
-                    await step.update()
+                    elif isinstance(block, ToolResultBlock):
+                        step = steps.pop(block.tool_use_id, None)
+                        if step is None:
+                            continue
+                        step.output = block.content
+                        if getattr(block, "is_error", False):
+                            step.is_error = True
+                        await step.update()
 
-                    artifacts.extend(await _render_html_files(str(block.content)))
+                        artifacts.extend(await _render_html_files(str(block.content)))
 
+            await reply.update()
+            artifacts.extend(await _render_html_files("".join(assistant_text)))
+    except TimeoutError:
+        sys.stderr.write(
+            f"[chatbot] chat turn timed out after {CHAT_TURN_TIMEOUT_S}s; "
+            "resetting Claude SDK client.\n"
+        )
+        await _reset_client_after_failure(client)
+        timeout_text = (
+            "\n\nThe agent timed out and the session was reset. Refresh the page "
+            "and start a new chat, or retry with a narrower request."
+        )
+        assistant_text.append(timeout_text)
+        await reply.stream_token(timeout_text)
         await reply.update()
-        artifacts.extend(await _render_html_files("".join(assistant_text)))
     except Exception as exc:
         if _is_sigterm_exit(exc):
             skip_mlflow_finish = True
